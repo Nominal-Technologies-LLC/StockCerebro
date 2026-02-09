@@ -6,16 +6,25 @@ interface Props {
 }
 
 export default function ScoreBreakdownView({ breakdown }: Props) {
+  const fundPct = Math.round(breakdown.fundamental_weight * 100);
+  const techPct = Math.round(breakdown.technical_weight * 100);
+  const hasFundamental = fundPct > 0;
+
   const items = [
-    { label: 'Fundamental', score: breakdown.fundamental_score, weight: '50%' },
-    { label: 'Technical (Daily)', score: breakdown.technical_daily_score, weight: '25%' },
-    { label: 'Technical (Weekly)', score: breakdown.technical_weekly_score, weight: '17.5%' },
-    { label: 'Technical (Hourly)', score: breakdown.technical_hourly_score, weight: '7.5%' },
+    ...(hasFundamental
+      ? [{ label: 'Fundamental', score: breakdown.fundamental_score, weight: `${fundPct}%` }]
+      : []),
+    { label: 'Technical (Daily)', score: breakdown.technical_daily_score, weight: `${Math.round(techPct * 0.50)}%` },
+    { label: 'Technical (Weekly)', score: breakdown.technical_weekly_score, weight: `${Math.round(techPct * 0.35)}%` },
+    { label: 'Technical (Hourly)', score: breakdown.technical_hourly_score, weight: `${Math.round(techPct * 0.15)}%` },
   ];
 
   return (
     <div className="card">
       <h3 className="card-header">Score Breakdown</h3>
+      {!hasFundamental && (
+        <p className="text-xs text-gray-500 mb-3">ETF — Technical analysis only</p>
+      )}
       <div className="space-y-3">
         {items.map((item) => (
           <div key={item.label}>

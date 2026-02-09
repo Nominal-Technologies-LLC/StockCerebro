@@ -10,21 +10,21 @@ sector/peer benchmark.
 # Sources: approximate cross-sector medians from S&P 500 constituents.
 # These serve as fallback when live peer data isn't available.
 SECTOR_BENCHMARKS: dict[str, dict[str, float]] = {
-    "Technology":              {"pe": 28, "pb": 7,   "ps": 6,   "peg": 1.5},
-    "Communication Services":  {"pe": 22, "pb": 3.5, "ps": 3.5, "peg": 1.8},
-    "Consumer Cyclical":       {"pe": 22, "pb": 5,   "ps": 1.5, "peg": 1.4},
-    "Consumer Defensive":      {"pe": 22, "pb": 5,   "ps": 1.8, "peg": 2.5},
-    "Healthcare":              {"pe": 25, "pb": 4,   "ps": 4,   "peg": 1.8},
-    "Financial Services":      {"pe": 13, "pb": 1.3, "ps": 3,   "peg": 1.5},
-    "Industrials":             {"pe": 20, "pb": 4,   "ps": 2,   "peg": 1.7},
-    "Energy":                  {"pe": 12, "pb": 1.8, "ps": 1.2, "peg": 1.0},
-    "Basic Materials":         {"pe": 15, "pb": 2,   "ps": 1.5, "peg": 1.5},
-    "Utilities":               {"pe": 17, "pb": 1.8, "ps": 2.5, "peg": 3.0},
-    "Real Estate":             {"pe": 35, "pb": 2,   "ps": 8,   "peg": 2.5},
+    "Technology":              {"pe": 28, "fpe": 24, "pb": 7,   "ps": 6,   "peg": 1.5},
+    "Communication Services":  {"pe": 22, "fpe": 19, "pb": 3.5, "ps": 3.5, "peg": 1.8},
+    "Consumer Cyclical":       {"pe": 22, "fpe": 19, "pb": 5,   "ps": 1.5, "peg": 1.4},
+    "Consumer Defensive":      {"pe": 22, "fpe": 20, "pb": 5,   "ps": 1.8, "peg": 2.5},
+    "Healthcare":              {"pe": 25, "fpe": 20, "pb": 4,   "ps": 4,   "peg": 1.8},
+    "Financial Services":      {"pe": 13, "fpe": 12, "pb": 1.3, "ps": 3,   "peg": 1.5},
+    "Industrials":             {"pe": 20, "fpe": 18, "pb": 4,   "ps": 2,   "peg": 1.7},
+    "Energy":                  {"pe": 12, "fpe": 11, "pb": 1.8, "ps": 1.2, "peg": 1.0},
+    "Basic Materials":         {"pe": 15, "fpe": 13, "pb": 2,   "ps": 1.5, "peg": 1.5},
+    "Utilities":               {"pe": 17, "fpe": 16, "pb": 1.8, "ps": 2.5, "peg": 3.0},
+    "Real Estate":             {"pe": 35, "fpe": 30, "pb": 2,   "ps": 8,   "peg": 2.5},
 }
 
 # Default benchmark for unknown sectors
-DEFAULT_BENCHMARK: dict[str, float] = {"pe": 20, "pb": 3, "ps": 3, "peg": 1.5}
+DEFAULT_BENCHMARK: dict[str, float] = {"pe": 20, "fpe": 17, "pb": 3, "ps": 3, "peg": 1.5}
 
 # Aliases: map alternate sector names from different data sources to canonical names
 _ALIASES: dict[str, str] = {

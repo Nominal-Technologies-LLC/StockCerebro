@@ -16,7 +16,8 @@
       "Bash(docker compose:*)",
       "Bash(curl:*)",
       "Bash(python3:*)",
-      "Bash(python -m json.tool:*)"
+      "Bash(python -m json.tool:*)",
+      "Bash(python:*)"
     ]
   }
 }

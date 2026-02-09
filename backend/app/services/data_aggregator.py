@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -42,9 +43,13 @@ class DataAggregator:
         # Primary: Yahoo v8 chart API (reliable, no auth needed)
         quote = await fetch_quote_via_chart(ticker)
         if quote:
-            # Supplement with Finnhub for sector/industry/description
-            finnhub_profile = await self.finnhub.get_company_profile(ticker)
-            if finnhub_profile:
+            # Supplement with Finnhub profile + basic financials concurrently
+            finnhub_profile, finnhub_metrics = await asyncio.gather(
+                self.finnhub.get_company_profile(ticker),
+                self.finnhub.get_basic_financials(ticker),
+                return_exceptions=True,
+            )
+            if isinstance(finnhub_profile, dict) and finnhub_profile:
                 quote["sector"] = finnhub_profile.get("finnhubIndustry")
                 quote["industry"] = finnhub_profile.get("finnhubIndustry")
                 quote["marketCap"] = finnhub_profile.get("marketCapitalization")
@@ -52,6 +57,19 @@ class DataAggregator:
                     quote["marketCap"] = quote["marketCap"] * 1_000_000  # Finnhub returns in millions
                 quote["website"] = finnhub_profile.get("weburl")
                 quote["logo_url"] = finnhub_profile.get("logo")
+
+            if isinstance(finnhub_metrics, dict) and finnhub_metrics:
+                metric = finnhub_metrics.get("metric", {})
+                if metric.get("peBasicExclExtraTTM"):
+                    quote["trailingPE"] = metric["peBasicExclExtraTTM"]
+                if metric.get("forwardPE"):
+                    quote["forwardPE"] = metric["forwardPE"]
+                if metric.get("beta"):
+                    quote["beta"] = metric["beta"]
+                if metric.get("dividendYieldIndicatedAnnual"):
+                    quote["dividendYield"] = metric["dividendYieldIndicatedAnnual"] / 100
+                if metric.get("10DayAverageTradingVolume"):
+                    quote["averageVolume"] = metric["10DayAverageTradingVolume"] * 1_000_000
 
             # Map to standard keys for _build_overview
             info = self._normalize_yahoo_direct(quote)
@@ -78,13 +96,14 @@ class DataAggregator:
             "regularMarketPrice": quote.get("regularMarketPrice"),
             "previousClose": quote.get("chartPreviousClose"),
             "regularMarketVolume": quote.get("regularMarketVolume"),
+            "averageVolume": quote.get("averageVolume"),
             "regularMarketDayHigh": quote.get("regularMarketDayHigh"),
             "regularMarketDayLow": quote.get("regularMarketDayLow"),
             "fiftyTwoWeekHigh": quote.get("fiftyTwoWeekHigh"),
             "fiftyTwoWeekLow": quote.get("fiftyTwoWeekLow"),
             "website": quote.get("website"),
             "logo_url": quote.get("logo_url"),
-            # These need Finnhub or yfinance for full data
+            "instrumentType": quote.get("instrumentType"),
             "trailingPE": quote.get("trailingPE"),
             "forwardPE": quote.get("forwardPE"),
             "dividendYield": quote.get("dividendYield"),
@@ -100,11 +119,15 @@ class DataAggregator:
             change = round(price - prev_close, 2)
             change_pct = round((change / prev_close) * 100, 2)
 
+        instrument_type = (info.get("instrumentType") or "").upper()
+        is_etf = instrument_type in ("ETF", "MUTUALFUND")
+
         return CompanyOverview(
             ticker=ticker,
             name=info.get("shortName") or info.get("longName"),
             sector=info.get("sector"),
             industry=info.get("industry"),
+            is_etf=is_etf,
             market_cap=info.get("marketCap"),
             price=price,
             change=change,

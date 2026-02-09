@@ -17,7 +17,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
 
   const { data: company, isLoading: companyLoading, error: companyError } = useCompanyOverview(ticker);
-  const { data: fundamental, isLoading: fundLoading } = useFundamental(ticker);
+  const isEtf = company?.is_etf ?? false;
+  const { data: fundamental, isLoading: fundLoading } = useFundamental(isEtf ? '' : ticker);
   const { data: scorecard, isLoading: scorecardLoading } = useScorecard(ticker);
   const { data: news } = useNews(ticker);
 
@@ -68,7 +69,7 @@ export default function App() {
         {company && (
           <>
             <CompanyHeader company={company} />
-            <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} />
+            <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} isEtf={isEtf} />
 
             {activeTab === 'overview' && (
               <div className="space-y-6">
@@ -81,7 +82,7 @@ export default function App() {
               </div>
             )}
 
-            {activeTab === 'fundamental' && (
+            {activeTab === 'fundamental' && !isEtf && (
               <>
                 {fundLoading && <LoadingSpinner message="Analyzing fundamentals..." />}
                 {fundamental && <FundamentalDashboard data={fundamental} />}

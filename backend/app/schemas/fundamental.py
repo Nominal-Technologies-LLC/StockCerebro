@@ -10,6 +10,7 @@ class MetricScore(BaseModel):
 
 class ValuationMetrics(BaseModel):
     pe_ratio: MetricScore = MetricScore()
+    forward_pe: MetricScore = MetricScore()
     peg_ratio: MetricScore = MetricScore()
     pb_ratio: MetricScore = MetricScore()
     ps_ratio: MetricScore = MetricScore()

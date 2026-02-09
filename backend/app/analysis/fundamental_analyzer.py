@@ -1,8 +1,9 @@
 """
 Fundamental analysis engine.
 Computes four equally weighted (25% each) sub-scores:
-- Valuation (PE 30%, PEG 35%, P/B 15%, P/S 20%)
+- Valuation (Forward PE 30%, PEG 25%, P/S 20%, P/B 15%, Trailing PE 10%)
   — scored RELATIVE to sector/peer benchmarks, not absolute thresholds
+  — PE and Forward PE are growth-adjusted: high-growth companies are allowed higher multiples
 - Growth (Revenue YoY 30%, Earnings YoY 30%, Revenue Trend 15%, Analyst Growth Est. 25%)
 - Financial Health (Interest Coverage 20%, FCF Yield 30%, OCF Trend 25%, D/E 15%, Current Ratio 10%)
 - Profitability (Gross Margin 20%, Operating Margin 30%, Net Margin 25%, Margin Trend 25%)
@@ -101,7 +102,7 @@ class FundamentalAnalyzer:
         else:
             overall = 0
 
-        total_metrics = 13
+        total_metrics = 14
         available_count = total_metrics - len(data_gaps)
         confidence = available_count / total_metrics
 
@@ -151,10 +152,15 @@ class FundamentalAnalyzer:
                 info["earningsGrowth"] = metric["epsGrowthTTMYoy"] / 100
             if not info.get("beta") and metric.get("beta"):
                 info["beta"] = metric["beta"]
+            if not info.get("forwardPE") and metric.get("forwardPE"):
+                info["forwardPE"] = metric["forwardPE"]
             if not info.get("dividendYield") and metric.get("dividendYieldIndicatedAnnual"):
                 info["dividendYield"] = metric["dividendYieldIndicatedAnnual"] / 100
             if not info.get("freeCashflow") and metric.get("freeCashFlowTTM"):
                 info["freeCashflow"] = metric["freeCashFlowTTM"]
+            # Growth rate data for PE growth adjustment
+            if not info.get("epsGrowth5Y") and metric.get("epsGrowth5Y"):
+                info["epsGrowth5Y"] = metric["epsGrowth5Y"]
             if not info.get("interestCoverage"):
                 ic = metric.get("netInterestCoverageTTM") or metric.get("netInterestCoverageAnnual")
                 if ic and ic > 0:
@@ -226,16 +232,19 @@ class FundamentalAnalyzer:
             tasks = [self.finnhub.get_basic_financials(p) for p in peer_tickers]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            pe_vals, pb_vals, ps_vals = [], [], []
+            pe_vals, fpe_vals, pb_vals, ps_vals = [], [], [], []
             for i, result in enumerate(results):
                 if isinstance(result, Exception) or result is None:
                     continue
                 metric = result.get("metric", {})
                 pe = metric.get("peBasicExclExtraTTM")
+                fpe = metric.get("forwardPE")
                 pb = metric.get("pbAnnual")
                 ps = metric.get("psTTM")
                 if pe and pe > 0:
                     pe_vals.append(pe)
+                if fpe and fpe > 0:
+                    fpe_vals.append(fpe)
                 if pb and pb > 0:
                     pb_vals.append(pb)
                 if ps and ps > 0:
@@ -244,8 +253,10 @@ class FundamentalAnalyzer:
             # Need at least 3 data points for a meaningful median
             if len(pe_vals) >= 3:
                 sector_fallback = get_benchmark(info.get("sector"))
+                pe_median = round(statistics.median(pe_vals), 2)
                 medians = {
-                    "pe": round(statistics.median(pe_vals), 2),
+                    "pe": pe_median,
+                    "fpe": round(statistics.median(fpe_vals), 2) if len(fpe_vals) >= 3 else round(pe_median * 0.85, 2),
                     "pb": round(statistics.median(pb_vals), 2) if len(pb_vals) >= 3 else sector_fallback["pb"],
                     "ps": round(statistics.median(ps_vals), 2) if len(ps_vals) >= 3 else sector_fallback["ps"],
                     "peg": sector_fallback["peg"],  # PEG not directly available from basic_financials
@@ -284,14 +295,19 @@ class FundamentalAnalyzer:
     # ── Valuation Scoring (Sector/Peer Relative) ────────────────────
 
     def _score_valuation(self, info: dict, financials: dict, data_gaps: list, benchmarks: dict) -> ValuationMetrics:
-        pe = self._score_pe(info, data_gaps, benchmarks)
+        growth_rate = self._get_earnings_growth_rate(info, financials)
+        pe = self._score_pe(info, data_gaps, benchmarks, growth_rate)
+        fpe = self._score_forward_pe(info, data_gaps, benchmarks, growth_rate)
         peg = self._score_peg(info, financials, data_gaps, benchmarks)
         pb = self._score_pb(info, data_gaps, benchmarks)
         ps = self._score_ps(info, data_gaps, benchmarks)
 
-        composite = _weighted_average([(pe, 0.30), (peg, 0.35), (pb, 0.15), (ps, 0.20)])
+        composite = _weighted_average([
+            (fpe, 0.30), (peg, 0.25), (ps, 0.20), (pb, 0.15), (pe, 0.10),
+        ])
         return ValuationMetrics(
             pe_ratio=pe,
+            forward_pe=fpe,
             peg_ratio=peg,
             pb_ratio=pb,
             ps_ratio=ps,
@@ -299,7 +315,45 @@ class FundamentalAnalyzer:
             grade=score_to_grade(composite),
         )
 
-    def _score_pe(self, info: dict, data_gaps: list, benchmarks: dict) -> MetricScore:
+    def _get_earnings_growth_rate(self, info: dict, financials: dict) -> float | None:
+        """Get best available earnings growth rate as a decimal (0.25 = 25%)."""
+        # Priority 1: TTM YoY earnings growth from Finnhub
+        eg = info.get("earningsGrowth")
+        if eg is not None and eg > 0:
+            return eg
+
+        # Priority 2: 5-year EPS CAGR from Finnhub (smoothed long-term)
+        eg5 = info.get("epsGrowth5Y")
+        if eg5 is not None and eg5 > 0:
+            return eg5 / 100
+
+        # Priority 3: Trailing 3-year EPS CAGR from financials
+        from app.analysis.peg_calculator import _calc_trailing_eps_growth
+        cagr = _calc_trailing_eps_growth(financials)
+        if cagr is not None and cagr > 0:
+            return cagr
+
+        return None
+
+    @staticmethod
+    def _growth_adjusted_benchmark(benchmark: float, growth_rate: float | None) -> float:
+        """
+        Adjust a PE benchmark upward for high-growth companies.
+        A company growing faster than the ~8% market average is allowed a higher PE.
+        """
+        if growth_rate is None or growth_rate <= 0 or benchmark <= 0:
+            return benchmark
+
+        BASELINE_GROWTH = 0.08  # ~8% is average market earnings growth
+        growth_ratio = growth_rate / BASELINE_GROWTH
+
+        # sqrt dampening: 2x growth → 1.41x benchmark, 4x growth → 2x benchmark
+        # Floor at 1.0: only boost for above-average growth, never penalize low growth
+        # Cap at 2.0 to prevent extreme adjustments
+        adjustment = max(1.0, min(growth_ratio ** 0.5, 2.0))
+        return benchmark * adjustment
+
+    def _score_pe(self, info: dict, data_gaps: list, benchmarks: dict, growth_rate: float | None) -> MetricScore:
         pe = info.get("trailingPE")
         if pe is None:
             data_gaps.append("PE Ratio")
@@ -309,8 +363,9 @@ class FundamentalAnalyzer:
                                description="Negative earnings")
 
         benchmark_pe = benchmarks.get("pe", 20)
-        score = score_relative(pe, benchmark_pe)
-        ratio = pe / benchmark_pe if benchmark_pe > 0 else 1
+        adj_benchmark = self._growth_adjusted_benchmark(benchmark_pe, growth_rate)
+        score = score_relative(pe, adj_benchmark)
+        ratio = pe / adj_benchmark if adj_benchmark > 0 else 1
         source = benchmarks.get("source", "sector")
 
         if ratio < 0.8:
@@ -322,8 +377,41 @@ class FundamentalAnalyzer:
         else:
             context = "Expensive vs peers"
 
-        desc = f"PE {pe:.1f} vs {source} median {benchmark_pe:.1f} — {context}"
+        growth_note = ""
+        if growth_rate and adj_benchmark > benchmark_pe * 1.05:
+            growth_note = f" (growth-adj {adj_benchmark:.0f})"
+        desc = f"PE {pe:.1f} vs {source} median {benchmark_pe:.1f}{growth_note} — {context}"
         return MetricScore(value=round(pe, 2), score=round(score, 1), grade=score_to_grade(score), description=desc)
+
+    def _score_forward_pe(self, info: dict, data_gaps: list, benchmarks: dict, growth_rate: float | None) -> MetricScore:
+        fpe = info.get("forwardPE")
+        if fpe is None:
+            data_gaps.append("Forward PE")
+            return MetricScore(description="Not available")
+        if fpe < 0:
+            return MetricScore(value=round(fpe, 2), score=10, grade=score_to_grade(10),
+                               description="Negative forward earnings")
+
+        benchmark_fpe = benchmarks.get("fpe", benchmarks.get("pe", 20) * 0.85)
+        adj_benchmark = self._growth_adjusted_benchmark(benchmark_fpe, growth_rate)
+        score = score_relative(fpe, adj_benchmark)
+        ratio = fpe / adj_benchmark if adj_benchmark > 0 else 1
+        source = benchmarks.get("source", "sector")
+
+        if ratio < 0.8:
+            context = "Undervalued vs peers"
+        elif ratio < 1.1:
+            context = "In line with peers"
+        elif ratio < 1.5:
+            context = "Premium to peers"
+        else:
+            context = "Expensive vs peers"
+
+        growth_note = ""
+        if growth_rate and adj_benchmark > benchmark_fpe * 1.05:
+            growth_note = f" (growth-adj {adj_benchmark:.0f})"
+        desc = f"Fwd PE {fpe:.1f} vs {source} median {benchmark_fpe:.1f}{growth_note} — {context}"
+        return MetricScore(value=round(fpe, 2), score=round(score, 1), grade=score_to_grade(score), description=desc)
 
     def _score_peg(self, info: dict, financials: dict, data_gaps: list, benchmarks: dict) -> MetricScore:
         peg, method = calculate_peg(info, financials)

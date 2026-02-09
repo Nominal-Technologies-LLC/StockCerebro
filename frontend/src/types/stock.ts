@@ -3,6 +3,7 @@ export interface CompanyOverview {
   name: string | null;
   sector: string | null;
   industry: string | null;
+  is_etf: boolean;
   market_cap: number | null;
   price: number | null;
   change: number | null;
@@ -47,6 +48,7 @@ export interface MetricScore {
 
 export interface ValuationMetrics {
   pe_ratio: MetricScore;
+  forward_pe: MetricScore;
   peg_ratio: MetricScore;
   pb_ratio: MetricScore;
   ps_ratio: MetricScore;

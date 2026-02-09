@@ -6,6 +6,7 @@ class CompanyOverview(BaseModel):
     name: str | None = None
     sector: str | None = None
     industry: str | None = None
+    is_etf: bool = False
     market_cap: float | None = None
     price: float | None = None
     change: float | None = None

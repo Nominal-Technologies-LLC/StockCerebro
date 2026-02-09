@@ -40,6 +40,7 @@ export default function FundamentalDashboard({ data }: Props) {
               <LetterGrade grade={data.valuation.grade} size="sm" />
             </div>
           </div>
+          <MetricCard label="Forward P/E" metric={data.valuation.forward_pe} format={formatRatio} />
           <MetricCard label="P/E Ratio" metric={data.valuation.pe_ratio} format={formatRatio} />
           <MetricCard label="PEG Ratio" metric={data.valuation.peg_ratio} format={formatRatio} />
           <MetricCard label="P/B Ratio" metric={data.valuation.pb_ratio} format={formatRatio} />

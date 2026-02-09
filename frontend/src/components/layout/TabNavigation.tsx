@@ -1,16 +1,19 @@
 interface Props {
   activeTab: string;
   onTabChange: (tab: string) => void;
+  isEtf?: boolean;
 }
 
-const tabs = [
+const allTabs = [
   { id: 'overview', label: 'Overview' },
   { id: 'fundamental', label: 'Fundamental' },
   { id: 'technical', label: 'Technical' },
   { id: 'scorecard', label: 'Scorecard' },
 ];
 
-export default function TabNavigation({ activeTab, onTabChange }: Props) {
+export default function TabNavigation({ activeTab, onTabChange, isEtf }: Props) {
+  const tabs = isEtf ? allTabs.filter((t) => t.id !== 'fundamental') : allTabs;
+
   return (
     <nav className="flex gap-1 border-b border-gray-800 mb-4">
       {tabs.map((tab) => (

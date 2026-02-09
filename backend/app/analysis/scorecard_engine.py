@@ -26,48 +26,69 @@ class ScorecardEngine:
         tech_weekly = await self.aggregator.get_technical_analysis(ticker, "weekly")
         tech_hourly = await self.aggregator.get_technical_analysis(ticker, "hourly")
 
-        if not fundamental and not tech_daily:
+        if not tech_daily:
             return None
 
-        fund_score = fundamental.overall_score if fundamental else 50
         daily_score = tech_daily.overall_score if tech_daily else 50
         weekly_score = tech_weekly.overall_score if tech_weekly else 50
         hourly_score = tech_hourly.overall_score if tech_hourly else 50
-
         tech_consensus = daily_score * 0.50 + weekly_score * 0.35 + hourly_score * 0.15
-        overall = fund_score * 0.50 + tech_consensus * 0.50
+
+        # Determine if fundamentals are meaningful (not an ETF with all N/A)
+        has_fundamentals = (
+            fundamental is not None
+            and fundamental.confidence > 0
+            and fundamental.overall_score > 0
+        )
+
+        if has_fundamentals:
+            fund_score = fundamental.overall_score
+            overall = fund_score * 0.50 + tech_consensus * 0.50
+            fund_weight = 0.50
+            tech_weight = 0.50
+        else:
+            # ETF or no fundamental data: 100% technical
+            fund_score = 0
+            overall = tech_consensus
+            fund_weight = 0.0
+            tech_weight = 1.0
+            fundamental = None  # Don't include empty fundamental data
 
         signal = score_to_signal(overall)
 
-        # Override rules
+        # Override rules (only when fundamentals are available)
         override_applied = False
         override_reason = ""
 
-        if fund_score < 30 and tech_consensus > 70:
-            if signal in ("STRONG BUY", "BUY"):
-                signal = "HOLD"
-                override_applied = True
-                override_reason = "Weak fundamentals override bullish technicals"
-        elif fund_score > 70 and tech_consensus < 30:
-            if signal in ("STRONG SELL", "SELL"):
-                signal = "HOLD"
-                override_applied = True
-                override_reason = "Strong fundamentals override bearish technicals"
+        if has_fundamentals:
+            if fund_score < 30 and tech_consensus > 70:
+                if signal in ("STRONG BUY", "BUY"):
+                    signal = "HOLD"
+                    override_applied = True
+                    override_reason = "Weak fundamentals override bullish technicals"
+            elif fund_score > 70 and tech_consensus < 30:
+                if signal in ("STRONG SELL", "SELL"):
+                    signal = "HOLD"
+                    override_applied = True
+                    override_reason = "Strong fundamentals override bearish technicals"
 
         # Swing trade assessment
-        swing = self._assess_swing_trade(tech_daily, fund_score)
+        swing = self._assess_swing_trade(tech_daily, fund_score if has_fundamentals else 50)
 
         # Confidence
-        confidence = 0.5
-        if fundamental:
+        if has_fundamentals:
             confidence = fundamental.confidence
+        else:
+            confidence = 0.7  # Technical-only has decent confidence
 
         breakdown = ScoreBreakdown(
             fundamental_score=round(fund_score, 1),
+            fundamental_weight=round(fund_weight, 2),
             technical_daily_score=round(daily_score, 1),
             technical_weekly_score=round(weekly_score, 1),
             technical_hourly_score=round(hourly_score, 1),
             technical_consensus=round(tech_consensus, 1),
+            technical_weight=round(tech_weight, 2),
         )
 
         return Scorecard(

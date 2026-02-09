@@ -85,6 +85,7 @@ def _parse_chart_result(result: dict) -> dict:
             "longName": meta.get("longName"),
             "currency": meta.get("currency"),
             "exchange": meta.get("exchangeName"),
+            "instrumentType": meta.get("instrumentType"),
             "regularMarketPrice": price,
             "chartPreviousClose": prev_close,
             "change": change,
@@ -101,7 +102,7 @@ def _parse_chart_result(result: dict) -> dict:
 
 async def fetch_quote_via_chart(ticker: str) -> dict | None:
     """Get basic quote info using the chart API metadata."""
-    result = await fetch_chart(ticker, range_="5d", interval="1d")
+    result = await fetch_chart(ticker, range_="1d", interval="1d")
     if not result:
         return None
     return result["meta"]
