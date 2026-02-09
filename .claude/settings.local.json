@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:finnhub.io)",
+      "WebFetch(domain:site.financialmodelingprep.com)",
+      "WebFetch(domain:www.alphavantage.co)",
+      "WebFetch(domain:www.ksred.com)",
+      "WebFetch(domain:alphalog.ai)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:ranaroussi.github.io)",
+      "WebFetch(domain:www.sec.gov)",
+      "Bash(dir:*)",
+      "Bash(docker:*)",
+      "Bash(docker-compose:*)",
+      "Bash(docker compose:*)",
+      "Bash(curl:*)",
+      "Bash(python3:*)"
+    ]
+  }
+}
