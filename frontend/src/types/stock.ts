@@ -64,11 +64,16 @@ export interface GrowthMetrics {
 }
 
 export interface HealthMetrics {
+  // Standard metrics (non-financial companies)
   debt_to_equity: MetricScore;
   current_ratio: MetricScore;
-  quick_ratio: MetricScore;
+  interest_coverage: MetricScore;
   fcf_yield: MetricScore;
   ocf_trend: MetricScore;
+  // Bank/financial metrics
+  roe: MetricScore;
+  roa: MetricScore;
+  payout_ratio: MetricScore;
   composite_score: number;
   grade: string;
 }
@@ -124,6 +129,23 @@ export interface SupportResistance {
   score: number;
 }
 
+export interface VolumeAnalysis {
+  current_volume: number | null;
+  avg_volume_20: number | null;
+  relative_volume: number | null;
+  volume_trend: string;
+  price_volume_confirmation: string;
+  obv_trend: string;
+  score: number;
+}
+
+export interface ChartPattern {
+  name: string;
+  signal: string;
+  bias: number;
+  description: string;
+}
+
 export interface TechnicalAnalysis {
   ticker: string;
   timeframe: string;
@@ -133,6 +155,9 @@ export interface TechnicalAnalysis {
   macd: MACDData;
   rsi: RSIData;
   support_resistance: SupportResistance;
+  volume_analysis: VolumeAnalysis;
+  patterns: ChartPattern[];
+  pattern_score: number;
   overall_score: number;
   grade: string;
   signal: string;

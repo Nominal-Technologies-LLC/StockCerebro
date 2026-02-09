@@ -221,27 +221,29 @@ class CacheManager:
 
     # --- Peer Cache ---
 
-    async def get_peers(self, ticker: str, ttl: int = 86400) -> list | None:
+    async def get_peer_benchmarks(self, ticker: str, ttl: int = 86400) -> dict | None:
+        """Return cached peer data: {"peers": [...], "medians": {"pe": X, ...}, "source": "peers"|"sector"}."""
         result = await self.db.execute(
             select(PeerCache).where(PeerCache.ticker == ticker)
         )
         cached = result.scalar_one_or_none()
         if cached and not _is_stale(cached.fetched_at, ttl):
-            return cached.peers.get("peers", []) if cached.peers else []
+            return cached.peers if cached.peers else None
         return None
 
-    async def set_peers(self, ticker: str, peers: list):
+    async def set_peer_benchmarks(self, ticker: str, data: dict):
+        """Store peer data with medians: {"peers": [...], "medians": {"pe": X, ...}, "source": "..."}."""
         result = await self.db.execute(
             select(PeerCache).where(PeerCache.ticker == ticker)
         )
         existing = result.scalar_one_or_none()
         if existing:
-            existing.peers = {"peers": peers}
+            existing.peers = data
             existing.fetched_at = datetime.now(timezone.utc)
         else:
             entry = PeerCache(
                 ticker=ticker,
-                peers={"peers": peers},
+                peers=data,
                 fetched_at=datetime.now(timezone.utc),
             )
             self.db.add(entry)

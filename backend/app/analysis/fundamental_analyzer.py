@@ -2,19 +2,23 @@
 Fundamental analysis engine.
 Computes four equally weighted (25% each) sub-scores:
 - Valuation (PE 30%, PEG 35%, P/B 15%, P/S 20%)
+  — scored RELATIVE to sector/peer benchmarks, not absolute thresholds
 - Growth (Revenue YoY 30%, Earnings YoY 30%, Revenue Trend 15%, Analyst Growth Est. 25%)
-- Financial Health (D/E 25%, Current Ratio 15%, Quick Ratio 10%, FCF Yield 30%, OCF Trend 20%)
+- Financial Health (Interest Coverage 20%, FCF Yield 30%, OCF Trend 25%, D/E 15%, Current Ratio 10%)
 - Profitability (Gross Margin 20%, Operating Margin 30%, Net Margin 25%, Margin Trend 25%)
 
 When a metric is missing (N/A), its weight is redistributed proportionally among
 the metrics that do have data, so missing data never drags down the score.
 """
+import asyncio
 import logging
+import statistics
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analysis.grading import clamp, score_to_grade
 from app.analysis.peg_calculator import calculate_peg
+from app.analysis.sector_benchmarks import get_benchmark, score_relative
 from app.schemas.fundamental import (
     FundamentalAnalysis,
     GrowthMetrics,
@@ -30,10 +34,24 @@ from app.services.yfinance_service import YFinanceService
 logger = logging.getLogger(__name__)
 
 
+def _interpolate(value: float, breakpoints: list[tuple[float, float]]) -> float:
+    """Smooth linear interpolation between breakpoints [(input_value, score), ...]."""
+    if value <= breakpoints[0][0]:
+        return float(breakpoints[0][1])
+    if value >= breakpoints[-1][0]:
+        return float(breakpoints[-1][1])
+    for i in range(len(breakpoints) - 1):
+        v1, s1 = breakpoints[i]
+        v2, s2 = breakpoints[i + 1]
+        if v1 <= value <= v2:
+            t = (value - v1) / (v2 - v1)
+            return round(s1 + t * (s2 - s1), 1)
+    return 50.0
+
+
 def _weighted_average(items: list[tuple[MetricScore, float]]) -> float:
     """
     Compute weighted average, redistributing weight from missing metrics.
-    items: list of (MetricScore, base_weight) tuples.
     A metric is considered missing if its value is None and its score is 0.
     """
     available = [(m, w) for m, w in items if m.value is not None or m.score > 0]
@@ -53,7 +71,6 @@ class FundamentalAnalyzer:
         self.finnhub = finnhub
 
     async def analyze(self, ticker: str) -> FundamentalAnalysis | None:
-        # Fetch data
         info = await self._get_info(ticker)
         if not info:
             return None
@@ -61,8 +78,11 @@ class FundamentalAnalyzer:
         financials = await self._get_financials(ticker)
         data_gaps = []
 
+        # Fetch sector/peer benchmarks for relative valuation scoring
+        benchmarks = await self._get_peer_benchmarks(ticker, info)
+
         # Compute sub-scores
-        valuation = self._score_valuation(info, financials, data_gaps)
+        valuation = self._score_valuation(info, financials, data_gaps, benchmarks)
         growth = self._score_growth(info, financials, data_gaps)
         health = self._score_health(info, financials, data_gaps)
         profitability = self._score_profitability(info, financials, data_gaps)
@@ -81,10 +101,9 @@ class FundamentalAnalyzer:
         else:
             overall = 0
 
-        # Confidence based on data completeness
         total_metrics = 13
-        available = total_metrics - len(data_gaps)
-        confidence = available / total_metrics
+        available_count = total_metrics - len(data_gaps)
+        confidence = available_count / total_metrics
 
         return FundamentalAnalysis(
             ticker=ticker,
@@ -98,15 +117,16 @@ class FundamentalAnalyzer:
             data_gaps=data_gaps,
         )
 
+    # ── Data Fetching ────────────────────────────────────────────────
+
     async def _get_info(self, ticker: str) -> dict | None:
         cached = await self.cache.get_company(ticker)
         info = cached or {}
 
-        # Enrich with Finnhub basic financials (PE, PB, margins, etc.)
+        # Enrich with Finnhub basic financials
         finnhub_metrics = await self.finnhub.get_basic_financials(ticker)
         if finnhub_metrics:
             metric = finnhub_metrics.get("metric", {})
-            # Map Finnhub metric keys to yfinance-compatible keys
             if not info.get("trailingPE") and metric.get("peBasicExclExtraTTM"):
                 info["trailingPE"] = metric["peBasicExclExtraTTM"]
             if not info.get("priceToBook") and metric.get("pbAnnual"):
@@ -135,9 +155,39 @@ class FundamentalAnalyzer:
                 info["dividendYield"] = metric["dividendYieldIndicatedAnnual"] / 100
             if not info.get("freeCashflow") and metric.get("freeCashFlowTTM"):
                 info["freeCashflow"] = metric["freeCashFlowTTM"]
+            if not info.get("interestCoverage"):
+                ic = metric.get("netInterestCoverageTTM") or metric.get("netInterestCoverageAnnual")
+                if ic and ic > 0:
+                    info["interestCoverage"] = ic
+            if not info.get("evFcfRatio") and metric.get("currentEv/freeCashFlowTTM"):
+                ev_fcf = metric["currentEv/freeCashFlowTTM"]
+                if ev_fcf > 0:
+                    info["evFcfRatio"] = ev_fcf
+            # Bank-specific metrics
+            if not info.get("roe"):
+                roe = metric.get("roeTTM") or metric.get("roeRfy")
+                if roe is not None:
+                    info["roe"] = roe
+            if not info.get("roa"):
+                roa = metric.get("roaTTM") or metric.get("roaRfy")
+                if roa is not None:
+                    info["roa"] = roa
+            if not info.get("payoutRatio"):
+                pr = metric.get("payoutRatioTTM") or metric.get("payoutRatioAnnual")
+                if pr is not None:
+                    info["payoutRatio"] = pr
+
+        # Enrich with Finnhub company profile for sector/industry
+        if not info.get("sector"):
+            profile = await self.finnhub.get_company_profile(ticker)
+            if profile:
+                fh_industry = profile.get("finnhubIndustry")
+                if fh_industry:
+                    info["sector"] = fh_industry
+                if not info.get("name"):
+                    info["name"] = profile.get("name")
 
         if not info:
-            # Last resort: try yfinance
             yf_info = await self.yf.get_info(ticker)
             if yf_info:
                 info = yf_info
@@ -149,19 +199,95 @@ class FundamentalAnalyzer:
         cached = await self.cache.get_fundamental(ticker, "financials")
         if cached:
             return cached
-        # Try yfinance (may fail with 429)
         data = await self.yf.get_financials(ticker)
         if data:
             await self.cache.set_fundamental(ticker, "financials", "yfinance", data)
         return data or {}
 
-    # --- Valuation Scoring ---
+    async def _get_peer_benchmarks(self, ticker: str, info: dict) -> dict:
+        """
+        Get valuation benchmarks from peers or sector.
+        Returns: {"pe": float, "pb": float, "ps": float, "peg": float, "source": str}
+        """
+        # Check cache first
+        cached = await self.cache.get_peer_benchmarks(ticker)
+        if cached and cached.get("medians"):
+            medians = cached["medians"]
+            medians["source"] = cached.get("source", "peers")
+            return medians
 
-    def _score_valuation(self, info: dict, financials: dict, data_gaps: list) -> ValuationMetrics:
-        pe = self._score_pe(info, data_gaps)
-        peg = self._score_peg(info, financials, data_gaps)
-        pb = self._score_pb(info, data_gaps)
-        ps = self._score_ps(info, data_gaps)
+        # Try fetching live peer data from Finnhub
+        peer_tickers = await self.finnhub.get_peers(ticker)
+        if peer_tickers and len(peer_tickers) >= 3:
+            # Limit to 8 peers to keep API calls reasonable
+            peer_tickers = peer_tickers[:8]
+
+            # Fetch basic_financials for all peers concurrently
+            tasks = [self.finnhub.get_basic_financials(p) for p in peer_tickers]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            pe_vals, pb_vals, ps_vals = [], [], []
+            for i, result in enumerate(results):
+                if isinstance(result, Exception) or result is None:
+                    continue
+                metric = result.get("metric", {})
+                pe = metric.get("peBasicExclExtraTTM")
+                pb = metric.get("pbAnnual")
+                ps = metric.get("psTTM")
+                if pe and pe > 0:
+                    pe_vals.append(pe)
+                if pb and pb > 0:
+                    pb_vals.append(pb)
+                if ps and ps > 0:
+                    ps_vals.append(ps)
+
+            # Need at least 3 data points for a meaningful median
+            if len(pe_vals) >= 3:
+                sector_fallback = get_benchmark(info.get("sector"))
+                medians = {
+                    "pe": round(statistics.median(pe_vals), 2),
+                    "pb": round(statistics.median(pb_vals), 2) if len(pb_vals) >= 3 else sector_fallback["pb"],
+                    "ps": round(statistics.median(ps_vals), 2) if len(ps_vals) >= 3 else sector_fallback["ps"],
+                    "peg": sector_fallback["peg"],  # PEG not directly available from basic_financials
+                }
+
+                # Cache the result
+                cache_data = {
+                    "peers": peer_tickers,
+                    "medians": medians,
+                    "source": "peers",
+                    "peer_count": len(pe_vals),
+                }
+                await self.cache.set_peer_benchmarks(ticker, cache_data)
+
+                medians["source"] = "peers"
+                logger.info(f"Peer benchmarks for {ticker}: PE={medians['pe']}, P/B={medians['pb']}, P/S={medians['ps']} (from {len(pe_vals)} peers)")
+                return medians
+
+        # Fallback: use sector benchmarks
+        sector = info.get("sector")
+        benchmarks = get_benchmark(sector)
+        source = f"sector ({sector})" if sector else "default"
+
+        # Cache sector fallback too so we don't re-fetch peers that returned too few results
+        cache_data = {
+            "peers": peer_tickers or [],
+            "medians": benchmarks,
+            "source": source,
+        }
+        await self.cache.set_peer_benchmarks(ticker, cache_data)
+
+        benchmarks_with_source = {**benchmarks, "source": source}
+        logger.info(f"Using {source} benchmarks for {ticker}: PE={benchmarks['pe']}, P/B={benchmarks['pb']}, P/S={benchmarks['ps']}")
+        return benchmarks_with_source
+
+    # ── Valuation Scoring (Sector/Peer Relative) ────────────────────
+
+    def _score_valuation(self, info: dict, financials: dict, data_gaps: list, benchmarks: dict) -> ValuationMetrics:
+        pe = self._score_pe(info, data_gaps, benchmarks)
+        peg = self._score_peg(info, financials, data_gaps, benchmarks)
+        pb = self._score_pb(info, data_gaps, benchmarks)
+        ps = self._score_ps(info, data_gaps, benchmarks)
 
         composite = _weighted_average([(pe, 0.30), (peg, 0.35), (pb, 0.15), (ps, 0.20)])
         return ValuationMetrics(
@@ -173,105 +299,101 @@ class FundamentalAnalyzer:
             grade=score_to_grade(composite),
         )
 
-    def _score_pe(self, info: dict, data_gaps: list) -> MetricScore:
+    def _score_pe(self, info: dict, data_gaps: list, benchmarks: dict) -> MetricScore:
         pe = info.get("trailingPE")
         if pe is None:
             data_gaps.append("PE Ratio")
             return MetricScore(description="Not available")
         if pe < 0:
-            score = 10
-        elif pe < 10:
-            score = 95
-        elif pe < 15:
-            score = 85
-        elif pe < 20:
-            score = 70
-        elif pe < 25:
-            score = 55
-        elif pe < 30:
-            score = 40
-        elif pe < 40:
-            score = 25
-        else:
-            score = 10
-        return MetricScore(value=round(pe, 2), score=score, grade=score_to_grade(score), description=self._pe_desc(pe))
+            return MetricScore(value=round(pe, 2), score=10, grade=score_to_grade(10),
+                               description="Negative earnings")
 
-    def _pe_desc(self, pe: float) -> str:
-        if pe < 0:
-            return "Negative earnings"
-        elif pe < 15:
-            return "Undervalued"
-        elif pe < 25:
-            return "Fairly valued"
-        else:
-            return "Premium valuation"
+        benchmark_pe = benchmarks.get("pe", 20)
+        score = score_relative(pe, benchmark_pe)
+        ratio = pe / benchmark_pe if benchmark_pe > 0 else 1
+        source = benchmarks.get("source", "sector")
 
-    def _score_peg(self, info: dict, financials: dict, data_gaps: list) -> MetricScore:
+        if ratio < 0.8:
+            context = "Undervalued vs peers"
+        elif ratio < 1.1:
+            context = "In line with peers"
+        elif ratio < 1.5:
+            context = "Premium to peers"
+        else:
+            context = "Expensive vs peers"
+
+        desc = f"PE {pe:.1f} vs {source} median {benchmark_pe:.1f} — {context}"
+        return MetricScore(value=round(pe, 2), score=round(score, 1), grade=score_to_grade(score), description=desc)
+
+    def _score_peg(self, info: dict, financials: dict, data_gaps: list, benchmarks: dict) -> MetricScore:
         peg, method = calculate_peg(info, financials)
         if peg is None:
             data_gaps.append("PEG Ratio")
             return MetricScore(description="Cannot calculate PEG")
-
         if peg < 0:
-            score = 10
-        elif peg < 0.5:
-            score = 95
-        elif peg < 1.0:
-            score = 85
-        elif peg < 1.5:
-            score = 65
-        elif peg < 2.0:
-            score = 45
-        elif peg < 3.0:
-            score = 25
+            return MetricScore(value=round(peg, 2), score=10, grade=score_to_grade(10),
+                               description=f"Negative PEG ({method})")
+
+        benchmark_peg = benchmarks.get("peg", 1.5)
+        score = score_relative(peg, benchmark_peg)
+        ratio = peg / benchmark_peg if benchmark_peg > 0 else 1
+        source = benchmarks.get("source", "sector")
+
+        if ratio < 0.7:
+            context = "Undervalued for growth"
+        elif ratio < 1.0:
+            context = "Good value for growth"
+        elif ratio < 1.3:
+            context = "Fairly valued for growth"
         else:
-            score = 10
+            context = "Expensive for growth"
 
-        desc = f"PEG {peg:.2f} ({method})"
-        if peg < 1:
-            desc += " - Undervalued relative to growth"
-        elif peg < 2:
-            desc += " - Fairly valued for growth"
-        else:
-            desc += " - Expensive for growth rate"
+        desc = f"PEG {peg:.2f} ({method}) vs {source} median {benchmark_peg:.2f} — {context}"
+        return MetricScore(value=round(peg, 2), score=round(score, 1), grade=score_to_grade(score), description=desc)
 
-        return MetricScore(value=round(peg, 2), score=score, grade=score_to_grade(score), description=desc)
-
-    def _score_pb(self, info: dict, data_gaps: list) -> MetricScore:
+    def _score_pb(self, info: dict, data_gaps: list, benchmarks: dict) -> MetricScore:
         pb = info.get("priceToBook")
         if pb is None:
             data_gaps.append("P/B Ratio")
             return MetricScore(description="Not available")
-        if pb < 1:
-            score = 90
-        elif pb < 2:
-            score = 75
-        elif pb < 3:
-            score = 60
-        elif pb < 5:
-            score = 40
-        else:
-            score = 20
-        return MetricScore(value=round(pb, 2), score=score, grade=score_to_grade(score))
 
-    def _score_ps(self, info: dict, data_gaps: list) -> MetricScore:
+        benchmark_pb = benchmarks.get("pb", 3)
+        score = score_relative(pb, benchmark_pb)
+        source = benchmarks.get("source", "sector")
+        ratio = pb / benchmark_pb if benchmark_pb > 0 else 1
+
+        if ratio < 0.8:
+            context = "Below peer avg"
+        elif ratio < 1.2:
+            context = "In line with peers"
+        else:
+            context = "Above peer avg"
+
+        desc = f"P/B {pb:.1f} vs {source} median {benchmark_pb:.1f} — {context}"
+        return MetricScore(value=round(pb, 2), score=round(score, 1), grade=score_to_grade(score), description=desc)
+
+    def _score_ps(self, info: dict, data_gaps: list, benchmarks: dict) -> MetricScore:
         ps = info.get("priceToSalesTrailing12Months")
         if ps is None:
             data_gaps.append("P/S Ratio")
             return MetricScore(description="Not available")
-        if ps < 1:
-            score = 90
-        elif ps < 3:
-            score = 75
-        elif ps < 5:
-            score = 55
-        elif ps < 10:
-            score = 35
-        else:
-            score = 15
-        return MetricScore(value=round(ps, 2), score=score, grade=score_to_grade(score))
 
-    # --- Growth Scoring ---
+        benchmark_ps = benchmarks.get("ps", 3)
+        score = score_relative(ps, benchmark_ps)
+        source = benchmarks.get("source", "sector")
+        ratio = ps / benchmark_ps if benchmark_ps > 0 else 1
+
+        if ratio < 0.8:
+            context = "Below peer avg"
+        elif ratio < 1.2:
+            context = "In line with peers"
+        else:
+            context = "Above peer avg"
+
+        desc = f"P/S {ps:.1f} vs {source} median {benchmark_ps:.1f} — {context}"
+        return MetricScore(value=round(ps, 2), score=round(score, 1), grade=score_to_grade(score), description=desc)
+
+    # ── Growth Scoring ───────────────────────────────────────────────
 
     def _score_growth(self, info: dict, financials: dict, data_gaps: list) -> GrowthMetrics:
         rev_yoy = self._score_revenue_yoy(info, financials, data_gaps)
@@ -377,24 +499,56 @@ class FundamentalAnalyzer:
             data_gaps.append("Analyst Growth Est.")
             return MetricScore(description="Not available")
 
-    # --- Health Scoring ---
+    # ── Health Scoring ───────────────────────────────────────────────
+    # Standard weights: IC 20%, FCF 30%, OCF 25%, D/E 15%, CR 10%
+    # Bank weights: ROE 35%, ROA 25%, D/E (lenient) 20%, Payout 20%
+
+    @staticmethod
+    def _is_financial_sector(sector: str | None) -> bool:
+        if not sector:
+            return False
+        s = sector.lower()
+        return any(x in s for x in ["financial", "banking", "insurance", "bank"])
 
     def _score_health(self, info: dict, financials: dict, data_gaps: list) -> HealthMetrics:
+        if self._is_financial_sector(info.get("sector")):
+            return self._score_bank_health(info, data_gaps)
+        return self._score_standard_health(info, financials, data_gaps)
+
+    def _score_standard_health(self, info: dict, financials: dict, data_gaps: list) -> HealthMetrics:
         de = self._score_debt_to_equity(info, data_gaps)
         cr = self._score_current_ratio(info, data_gaps)
-        qr = self._score_quick_ratio(info, data_gaps)
+        ic = self._score_interest_coverage(info, data_gaps)
         fcf = self._score_fcf_yield(info, financials, data_gaps)
         ocf = self._score_ocf_trend(financials, data_gaps)
 
         composite = _weighted_average([
-            (de, 0.25), (cr, 0.15), (qr, 0.10), (fcf, 0.30), (ocf, 0.20),
+            (de, 0.15), (cr, 0.10), (ic, 0.20), (fcf, 0.30), (ocf, 0.25),
         ])
         return HealthMetrics(
             debt_to_equity=de,
             current_ratio=cr,
-            quick_ratio=qr,
+            interest_coverage=ic,
             fcf_yield=fcf,
             ocf_trend=ocf,
+            composite_score=round(composite, 1),
+            grade=score_to_grade(composite),
+        )
+
+    def _score_bank_health(self, info: dict, data_gaps: list) -> HealthMetrics:
+        de = self._score_bank_debt_to_equity(info, data_gaps)
+        roe = self._score_roe(info, data_gaps)
+        roa = self._score_roa(info, data_gaps)
+        pr = self._score_payout_ratio(info, data_gaps)
+
+        composite = _weighted_average([
+            (roe, 0.35), (roa, 0.25), (de, 0.20), (pr, 0.20),
+        ])
+        return HealthMetrics(
+            debt_to_equity=de,
+            roe=roe,
+            roa=roa,
+            payout_ratio=pr,
             composite_score=round(composite, 1),
             grade=score_to_grade(composite),
         )
@@ -405,78 +559,119 @@ class FundamentalAnalyzer:
             data_gaps.append("Debt/Equity")
             return MetricScore(description="Not available")
         de_ratio = de / 100 if de > 10 else de
-        if de_ratio < 0.3:
-            score = 90
-        elif de_ratio < 0.5:
-            score = 80
+
+        score = _interpolate(de_ratio, [
+            (0.0, 92), (0.3, 85), (0.5, 78), (0.8, 68),
+            (1.0, 60), (1.5, 50), (2.0, 40), (3.0, 28), (5.0, 15),
+        ])
+
+        if de_ratio < 0.5:
+            desc = f"D/E {de_ratio:.2f} — Very low leverage"
         elif de_ratio < 1.0:
-            score = 65
-        elif de_ratio < 1.5:
-            score = 45
+            desc = f"D/E {de_ratio:.2f} — Moderate leverage"
         elif de_ratio < 2.0:
-            score = 30
+            desc = f"D/E {de_ratio:.2f} — Elevated leverage"
         else:
-            score = 15
-        return MetricScore(value=round(de_ratio, 2), score=score, grade=score_to_grade(score))
+            desc = f"D/E {de_ratio:.2f} — High leverage"
+
+        return MetricScore(value=round(de_ratio, 2), score=round(score, 1),
+                           grade=score_to_grade(score), description=desc)
 
     def _score_current_ratio(self, info: dict, data_gaps: list) -> MetricScore:
         cr = info.get("currentRatio")
         if cr is None:
             data_gaps.append("Current Ratio")
             return MetricScore(description="Not available")
-        if cr >= 2.0:
-            score = 85
-        elif cr >= 1.5:
-            score = 75
-        elif cr >= 1.0:
-            score = 55
-        elif cr >= 0.5:
-            score = 30
-        else:
-            score = 10
-        return MetricScore(value=round(cr, 2), score=score, grade=score_to_grade(score))
 
-    def _score_quick_ratio(self, info: dict, data_gaps: list) -> MetricScore:
-        qr = info.get("quickRatio")
-        if qr is None:
-            data_gaps.append("Quick Ratio")
-            return MetricScore(description="Not available")
-        if qr >= 1.5:
-            score = 85
-        elif qr >= 1.0:
-            score = 70
-        elif qr >= 0.5:
-            score = 45
+        score = _interpolate(cr, [
+            (0.0, 5), (0.3, 15), (0.5, 30), (0.7, 42),
+            (0.9, 53), (1.0, 58), (1.3, 68), (1.5, 75),
+            (2.0, 85), (3.0, 88),
+        ])
+
+        if cr >= 2.0:
+            desc = f"Current ratio {cr:.2f} — Strong liquidity"
+        elif cr >= 1.0:
+            desc = f"Current ratio {cr:.2f} — Adequate liquidity"
+        elif cr >= 0.7:
+            desc = f"Current ratio {cr:.2f} — Tight liquidity"
         else:
-            score = 20
-        return MetricScore(value=round(qr, 2), score=score, grade=score_to_grade(score))
+            desc = f"Current ratio {cr:.2f} — Weak liquidity"
+
+        return MetricScore(value=round(cr, 2), score=round(score, 1),
+                           grade=score_to_grade(score), description=desc)
+
+    def _score_interest_coverage(self, info: dict, data_gaps: list) -> MetricScore:
+        ic = info.get("interestCoverage")
+        if ic is None:
+            data_gaps.append("Interest Coverage")
+            return MetricScore(description="Not available")
+
+        score = _interpolate(ic, [
+            (0, 5), (1, 15), (2, 30), (3, 40), (5, 55),
+            (8, 65), (12, 75), (20, 85), (50, 92), (100, 95),
+        ])
+
+        if ic >= 20:
+            desc = f"Interest coverage {ic:.1f}x — Excellent debt serviceability"
+        elif ic >= 8:
+            desc = f"Interest coverage {ic:.1f}x — Comfortable"
+        elif ic >= 3:
+            desc = f"Interest coverage {ic:.1f}x — Adequate"
+        elif ic >= 1:
+            desc = f"Interest coverage {ic:.1f}x — Tight"
+        else:
+            desc = f"Interest coverage {ic:.1f}x — Cannot cover interest"
+
+        return MetricScore(value=round(ic, 1), score=round(score, 1),
+                           grade=score_to_grade(score), description=desc)
 
     def _score_fcf_yield(self, info: dict, financials: dict, data_gaps: list) -> MetricScore:
         fcf = info.get("freeCashflow")
         market_cap = info.get("marketCap")
-        if not fcf or not market_cap or market_cap <= 0:
+        fcf_yield = None
+
+        # Try direct FCF / market_cap
+        if fcf and market_cap and market_cap > 0:
+            fcf_yield = (fcf / market_cap) * 100
+        else:
+            # Try from cash flow statements
             cf = financials.get("cash_flow", {})
             if cf:
                 latest = sorted(cf.keys(), reverse=True)
                 if latest:
-                    fcf = cf[latest[0]].get("Free Cash Flow") or cf[latest[0]].get("FreeCashFlow")
-            if not fcf or not market_cap or market_cap <= 0:
-                data_gaps.append("FCF Yield")
-                return MetricScore(description="Not available")
+                    stmt_fcf = cf[latest[0]].get("Free Cash Flow") or cf[latest[0]].get("FreeCashFlow")
+                    if stmt_fcf and market_cap and market_cap > 0:
+                        fcf_yield = (stmt_fcf / market_cap) * 100
 
-        fcf_yield = (fcf / market_cap) * 100
-        if fcf_yield > 10:
-            score = 95
-        elif fcf_yield > 6:
-            score = 80
-        elif fcf_yield > 3:
-            score = 65
+        # Fallback: derive from EV/FCF ratio (EV-based approximation)
+        if fcf_yield is None and info.get("evFcfRatio"):
+            ev_fcf = info["evFcfRatio"]
+            if ev_fcf > 0:
+                fcf_yield = (1.0 / ev_fcf) * 100
+
+        if fcf_yield is None:
+            data_gaps.append("FCF Yield")
+            return MetricScore(description="Not available")
+
+        score = _interpolate(fcf_yield, [
+            (-5, 5), (0, 20), (1, 38), (2, 50), (3, 60),
+            (4, 67), (5, 73), (7, 82), (10, 90), (15, 95),
+        ])
+
+        if fcf_yield > 8:
+            desc = f"FCF yield {fcf_yield:.1f}% — Excellent cash generation"
+        elif fcf_yield > 4:
+            desc = f"FCF yield {fcf_yield:.1f}% — Good cash generation"
+        elif fcf_yield > 1:
+            desc = f"FCF yield {fcf_yield:.1f}% — Moderate cash generation"
         elif fcf_yield > 0:
-            score = 45
+            desc = f"FCF yield {fcf_yield:.1f}% — Low but positive"
         else:
-            score = 15
-        return MetricScore(value=round(fcf_yield, 2), score=score, grade=score_to_grade(score),
-                           description=f"FCF yield {fcf_yield:.1f}%")
+            desc = f"FCF yield {fcf_yield:.1f}% — Negative free cash flow"
+
+        return MetricScore(value=round(fcf_yield, 2), score=round(score, 1),
+                           grade=score_to_grade(score), description=desc)
 
     def _score_ocf_trend(self, financials: dict, data_gaps: list) -> MetricScore:
         cf = financials.get("cash_flow", {})
@@ -495,24 +690,132 @@ class FundamentalAnalyzer:
             data_gaps.append("OCF Trend")
             return MetricScore(description="Limited OCF data")
 
-        if ocfs[0] > ocfs[1]:
-            if ocfs[0] > 0:
-                score = 80
-                desc = "Improving operating cash flow"
-            else:
-                score = 40
-                desc = "Negative but improving OCF"
+        # Compute growth rate for continuous scoring
+        if ocfs[1] != 0:
+            growth_pct = ((ocfs[0] - ocfs[1]) / abs(ocfs[1])) * 100
         else:
-            if ocfs[0] > 0:
-                score = 55
-                desc = "Positive but declining OCF"
+            growth_pct = 100 if ocfs[0] > 0 else -100
+
+        if ocfs[0] > 0:
+            score = _interpolate(growth_pct, [
+                (-50, 25), (-20, 35), (-5, 48), (0, 55),
+                (5, 63), (10, 70), (20, 80), (50, 90),
+            ])
+            if growth_pct > 10:
+                desc = f"OCF growing {growth_pct:+.0f}% — Strong and improving"
+            elif growth_pct > 0:
+                desc = f"OCF growing {growth_pct:+.0f}% — Positive and stable"
             else:
-                score = 15
-                desc = "Negative and declining OCF"
+                desc = f"OCF declining {growth_pct:+.0f}% — Positive but weakening"
+        else:
+            score = _interpolate(growth_pct, [
+                (-50, 5), (-20, 12), (0, 20), (50, 30),
+            ])
+            desc = "Negative operating cash flow"
 
-        return MetricScore(value=round(ocfs[0], 0), score=score, grade=score_to_grade(score), description=desc)
+        return MetricScore(value=round(ocfs[0], 0), score=round(score, 1),
+                           grade=score_to_grade(score), description=desc)
 
-    # --- Profitability Scoring ---
+    # ── Bank-Specific Health Methods ──────────────────────────────────
+
+    def _score_bank_debt_to_equity(self, info: dict, data_gaps: list) -> MetricScore:
+        de = info.get("debtToEquity")
+        if de is None:
+            data_gaps.append("Debt/Equity")
+            return MetricScore(description="Not available")
+        de_ratio = de / 100 if de > 10 else de
+
+        # Banks naturally carry higher leverage; 2-4 is normal
+        score = _interpolate(de_ratio, [
+            (0.0, 92), (1.5, 85), (3.0, 68), (4.0, 55),
+            (6.0, 38), (10.0, 18),
+        ])
+
+        if de_ratio < 2:
+            desc = f"D/E {de_ratio:.2f} — Low leverage for a bank"
+        elif de_ratio < 4:
+            desc = f"D/E {de_ratio:.2f} — Normal bank leverage"
+        elif de_ratio < 6:
+            desc = f"D/E {de_ratio:.2f} — Elevated for a bank"
+        else:
+            desc = f"D/E {de_ratio:.2f} — High leverage even for a bank"
+
+        return MetricScore(value=round(de_ratio, 2), score=round(score, 1),
+                           grade=score_to_grade(score), description=desc)
+
+    def _score_roe(self, info: dict, data_gaps: list) -> MetricScore:
+        roe = info.get("roe")
+        if roe is None:
+            data_gaps.append("Return on Equity")
+            return MetricScore(description="Not available")
+
+        score = _interpolate(roe, [
+            (0, 5), (3, 20), (7, 42), (10, 60),
+            (13, 72), (15, 80), (20, 90), (25, 95),
+        ])
+
+        if roe >= 15:
+            desc = f"ROE {roe:.1f}% — Excellent return on equity"
+        elif roe >= 10:
+            desc = f"ROE {roe:.1f}% — Good return on equity"
+        elif roe >= 5:
+            desc = f"ROE {roe:.1f}% — Moderate return on equity"
+        else:
+            desc = f"ROE {roe:.1f}% — Weak return on equity"
+
+        return MetricScore(value=round(roe, 2), score=round(score, 1),
+                           grade=score_to_grade(score), description=desc)
+
+    def _score_roa(self, info: dict, data_gaps: list) -> MetricScore:
+        roa = info.get("roa")
+        if roa is None:
+            data_gaps.append("Return on Assets")
+            return MetricScore(description="Not available")
+
+        # Banks: >1% is good, >1.5% is excellent (due to low-margin, high-leverage model)
+        score = _interpolate(roa, [
+            (0, 10), (0.3, 25), (0.5, 38), (0.8, 55),
+            (1.0, 65), (1.3, 76), (1.5, 82), (2.0, 92), (2.5, 95),
+        ])
+
+        if roa >= 1.5:
+            desc = f"ROA {roa:.2f}% — Excellent asset efficiency"
+        elif roa >= 1.0:
+            desc = f"ROA {roa:.2f}% — Good asset efficiency"
+        elif roa >= 0.5:
+            desc = f"ROA {roa:.2f}% — Moderate asset efficiency"
+        else:
+            desc = f"ROA {roa:.2f}% — Weak asset efficiency"
+
+        return MetricScore(value=round(roa, 2), score=round(score, 1),
+                           grade=score_to_grade(score), description=desc)
+
+    def _score_payout_ratio(self, info: dict, data_gaps: list) -> MetricScore:
+        pr = info.get("payoutRatio")
+        if pr is None:
+            data_gaps.append("Payout Ratio")
+            return MetricScore(description="Not available")
+
+        # Lower payout = more retained earnings = healthier balance sheet
+        # Sweet spot 20-40% balances shareholder returns with capital retention
+        score = _interpolate(pr, [
+            (0, 78), (10, 82), (25, 85), (40, 72),
+            (50, 62), (60, 50), (75, 33), (90, 18), (100, 5),
+        ])
+
+        if pr < 30:
+            desc = f"Payout {pr:.0f}% — Conservative, retaining most earnings"
+        elif pr < 50:
+            desc = f"Payout {pr:.0f}% — Balanced returns and retention"
+        elif pr < 70:
+            desc = f"Payout {pr:.0f}% — Elevated payout"
+        else:
+            desc = f"Payout {pr:.0f}% — High payout, limited retained earnings"
+
+        return MetricScore(value=round(pr, 1), score=round(score, 1),
+                           grade=score_to_grade(score), description=desc)
+
+    # ── Profitability Scoring ────────────────────────────────────────
 
     def _score_profitability(self, info: dict, financials: dict, data_gaps: list) -> ProfitabilityMetrics:
         gm = self._score_gross_margin(info, data_gaps)
@@ -629,7 +932,7 @@ class FundamentalAnalyzer:
         data_gaps.append("Margin Trend")
         return MetricScore(description="Cannot determine margin trend")
 
-    # --- Helpers ---
+    # ── Helpers ───────────────────────────────────────────────────────
 
     def _growth_rate_score(self, pct: float) -> float:
         if pct > 50:

@@ -1,9 +1,31 @@
 import type { TechnicalAnalysis } from '../../types/stock';
-import LetterGrade from '../common/LetterGrade';
-import SignalBadge from '../common/SignalBadge';
 
 interface Props {
   data: TechnicalAnalysis;
+}
+
+function formatVolume(v: number | null): string {
+  if (v == null) return 'N/A';
+  if (v >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(1)}B`;
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+  return v.toString();
+}
+
+function confirmLabel(c: string): string {
+  switch (c) {
+    case 'bullish': return 'Bullish';
+    case 'bearish': return 'Bearish';
+    case 'weak_bullish': return 'Weak Bullish';
+    case 'weak_bearish': return 'Weak Bearish';
+    default: return 'Neutral';
+  }
+}
+
+function confirmColor(c: string): string {
+  if (c.includes('bullish')) return 'text-green-400';
+  if (c.includes('bearish')) return 'text-red-400';
+  return 'text-gray-400';
 }
 
 export default function IndicatorPanel({ data }: Props) {
@@ -26,7 +48,6 @@ export default function IndicatorPanel({ data }: Props) {
           </div>
           <div className="text-sm text-gray-400">Score: {data.rsi.score.toFixed(0)}</div>
         </div>
-        {/* RSI bar */}
         {data.rsi.value != null && (
           <div className="mt-2">
             <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
@@ -78,6 +99,82 @@ export default function IndicatorPanel({ data }: Props) {
           <span className="text-sm text-gray-400">Score: {data.macd.score.toFixed(0)}</span>
         </div>
       </div>
+
+      {/* Volume Analysis */}
+      {data.volume_analysis && (
+        <div className="card">
+          <h4 className="card-header">Volume Analysis (Score: {data.volume_analysis.score.toFixed(0)})</h4>
+          <div className="grid grid-cols-3 gap-3 text-sm">
+            <div>
+              <div className="text-gray-500">Current</div>
+              <div className="font-medium text-white">{formatVolume(data.volume_analysis.current_volume)}</div>
+            </div>
+            <div>
+              <div className="text-gray-500">20-Avg</div>
+              <div className="font-medium text-white">{formatVolume(data.volume_analysis.avg_volume_20)}</div>
+            </div>
+            <div>
+              <div className="text-gray-500">Relative</div>
+              <div className={`font-medium ${
+                (data.volume_analysis.relative_volume ?? 1) > 1.2 ? 'text-yellow-400' :
+                (data.volume_analysis.relative_volume ?? 1) < 0.8 ? 'text-gray-500' : 'text-white'
+              }`}>
+                {data.volume_analysis.relative_volume?.toFixed(2) ?? 'N/A'}x
+              </div>
+            </div>
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-3 text-sm">
+            <div>
+              <div className="text-gray-500">Trend</div>
+              <div className={`font-medium ${
+                data.volume_analysis.volume_trend === 'increasing' ? 'text-yellow-400' :
+                data.volume_analysis.volume_trend === 'decreasing' ? 'text-gray-500' : 'text-white'
+              }`}>
+                {data.volume_analysis.volume_trend.charAt(0).toUpperCase() + data.volume_analysis.volume_trend.slice(1)}
+              </div>
+            </div>
+            <div>
+              <div className="text-gray-500">Price-Vol</div>
+              <div className={`font-medium ${confirmColor(data.volume_analysis.price_volume_confirmation)}`}>
+                {confirmLabel(data.volume_analysis.price_volume_confirmation)}
+              </div>
+            </div>
+            <div>
+              <div className="text-gray-500">OBV</div>
+              <div className={`font-medium ${
+                data.volume_analysis.obv_trend === 'rising' ? 'text-green-400' :
+                data.volume_analysis.obv_trend === 'falling' ? 'text-red-400' : 'text-gray-400'
+              }`}>
+                {data.volume_analysis.obv_trend.charAt(0).toUpperCase() + data.volume_analysis.obv_trend.slice(1)}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Chart Patterns */}
+      {data.patterns && data.patterns.length > 0 && (
+        <div className="card">
+          <h4 className="card-header">Chart Patterns (Score: {data.pattern_score.toFixed(0)})</h4>
+          <div className="space-y-2">
+            {data.patterns.map((p, i) => (
+              <div key={i} className="flex items-start justify-between text-sm">
+                <div className="flex-1">
+                  <span className="font-medium text-white">{p.name}</span>
+                  <p className="text-xs text-gray-500 mt-0.5">{p.description}</p>
+                </div>
+                <span className={`ml-3 text-xs px-2 py-0.5 rounded whitespace-nowrap ${
+                  p.signal === 'bullish' ? 'bg-green-500/20 text-green-400' :
+                  p.signal === 'bearish' ? 'bg-red-500/20 text-red-400' :
+                  'bg-gray-500/20 text-gray-400'
+                }`}>
+                  {p.signal.toUpperCase()}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Moving Averages */}
       <div className="card">

@@ -71,10 +71,20 @@ export default function FundamentalDashboard({ data }: Props) {
             </div>
           </div>
           <MetricCard label="Debt/Equity" metric={data.health.debt_to_equity} format={formatRatio} />
-          <MetricCard label="Current Ratio" metric={data.health.current_ratio} format={formatRatio} />
-          <MetricCard label="Quick Ratio" metric={data.health.quick_ratio} format={formatRatio} />
-          <MetricCard label="FCF Yield" metric={data.health.fcf_yield} format={(v) => `${v.toFixed(1)}%`} />
-          <MetricCard label="OCF Trend" metric={data.health.ocf_trend} />
+          {data.health.roe?.value != null ? (
+            <>
+              <MetricCard label="Return on Equity" metric={data.health.roe} format={(v) => `${v.toFixed(1)}%`} />
+              <MetricCard label="Return on Assets" metric={data.health.roa} format={(v) => `${v.toFixed(2)}%`} />
+              <MetricCard label="Payout Ratio" metric={data.health.payout_ratio} format={(v) => `${v.toFixed(0)}%`} />
+            </>
+          ) : (
+            <>
+              <MetricCard label="Current Ratio" metric={data.health.current_ratio} format={formatRatio} />
+              <MetricCard label="Interest Coverage" metric={data.health.interest_coverage} format={(v) => `${v.toFixed(1)}x`} />
+              <MetricCard label="FCF Yield" metric={data.health.fcf_yield} format={(v) => `${v.toFixed(1)}%`} />
+              <MetricCard label="OCF Trend" metric={data.health.ocf_trend} />
+            </>
+          )}
         </div>
 
         {/* Profitability */}

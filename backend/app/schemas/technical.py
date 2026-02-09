@@ -31,6 +31,23 @@ class SupportResistance(BaseModel):
     score: float = 0
 
 
+class VolumeAnalysis(BaseModel):
+    current_volume: int | None = None
+    avg_volume_20: int | None = None
+    relative_volume: float | None = None
+    volume_trend: str = "stable"  # increasing, decreasing, stable
+    price_volume_confirmation: str = "neutral"  # bullish, bearish, weak_bullish, weak_bearish, neutral
+    obv_trend: str = "flat"  # rising, falling, flat
+    score: float = 0
+
+
+class ChartPattern(BaseModel):
+    name: str
+    signal: str = "neutral"  # bullish, bearish, neutral
+    bias: float = 0  # -1 (bearish) to +1 (bullish)
+    description: str = ""
+
+
 class TechnicalAnalysis(BaseModel):
     ticker: str
     timeframe: str  # hourly, daily, weekly
@@ -40,6 +57,9 @@ class TechnicalAnalysis(BaseModel):
     macd: MACDData = MACDData()
     rsi: RSIData = RSIData()
     support_resistance: SupportResistance = SupportResistance()
+    volume_analysis: VolumeAnalysis = VolumeAnalysis()
+    patterns: list[ChartPattern] = []
+    pattern_score: float = 0
     overall_score: float = 0
     grade: str = "N/A"
     signal: str = "HOLD"

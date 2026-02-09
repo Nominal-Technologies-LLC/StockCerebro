@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +13,17 @@ from app.services.yfinance_service import YFinanceService
 from app.services.finnhub_service import FinnhubService
 
 logger = logging.getLogger(__name__)
+
+
+def _epoch_to_iso(epoch) -> str:
+    """Convert a unix epoch timestamp to an ISO 8601 UTC string."""
+    if epoch is None:
+        return ""
+    try:
+        ts = int(epoch)
+        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, TypeError, OSError):
+        return str(epoch)
 
 
 class DataAggregator:
@@ -207,7 +219,7 @@ class DataAggregator:
                     "title": n.get("headline", ""),
                     "url": n.get("url", ""),
                     "source": n.get("source", ""),
-                    "published": str(n.get("datetime", "")),
+                    "published": _epoch_to_iso(n.get("datetime")),
                     "summary": n.get("summary", ""),
                 }
                 for n in finnhub_news

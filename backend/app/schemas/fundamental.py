@@ -27,11 +27,16 @@ class GrowthMetrics(BaseModel):
 
 
 class HealthMetrics(BaseModel):
+    # Standard metrics (non-financial companies)
     debt_to_equity: MetricScore = MetricScore()
     current_ratio: MetricScore = MetricScore()
-    quick_ratio: MetricScore = MetricScore()
+    interest_coverage: MetricScore = MetricScore()
     fcf_yield: MetricScore = MetricScore()
     ocf_trend: MetricScore = MetricScore()
+    # Bank/financial metrics (populated for Financial Services sector)
+    roe: MetricScore = MetricScore()
+    roa: MetricScore = MetricScore()
+    payout_ratio: MetricScore = MetricScore()
     composite_score: float = 0
     grade: str = "N/A"
 

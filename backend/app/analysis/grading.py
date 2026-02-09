@@ -2,29 +2,34 @@
 
 
 def score_to_grade(score: float) -> str:
-    if score >= 93:
+    """Convert a 0-100 score to a letter grade.
+
+    Centered so 50 = average (C range), matching intuitive stock ratings:
+      A = great, B = pretty good, C = ok, D = not good, F = stay clear.
+    """
+    if score >= 92:
         return "A+"
-    elif score >= 90:
+    elif score >= 85:
         return "A"
-    elif score >= 87:
-        return "A-"
-    elif score >= 83:
-        return "B+"
     elif score >= 80:
-        return "B"
-    elif score >= 77:
-        return "B-"
-    elif score >= 73:
-        return "C+"
+        return "A-"
+    elif score >= 75:
+        return "B+"
     elif score >= 70:
-        return "C"
-    elif score >= 67:
-        return "C-"
-    elif score >= 63:
-        return "D+"
+        return "B"
+    elif score >= 65:
+        return "B-"
     elif score >= 60:
-        return "D"
+        return "C+"
+    elif score >= 55:
+        return "C"
     elif score >= 50:
+        return "C-"
+    elif score >= 45:
+        return "D+"
+    elif score >= 38:
+        return "D"
+    elif score >= 30:
         return "D-"
     elif score >= 20:
         return "F+"

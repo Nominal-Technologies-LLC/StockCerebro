@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useMemo } from 'react';
 import { createChart, ColorType, type IChartApi } from 'lightweight-charts';
 import type { ChartData, TechnicalAnalysis } from '../../types/stock';
 
@@ -10,6 +10,11 @@ interface Props {
 export default function PriceChart({ chartData, technical }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+
+  const isIntraday = useMemo(() => {
+    const iv = chartData.interval;
+    return iv.includes('h') || iv.includes('m');
+  }, [chartData.interval]);
 
   useEffect(() => {
     if (!containerRef.current || chartData.bars.length === 0) return;
@@ -35,7 +40,8 @@ export default function PriceChart({ chartData, technical }: Props) {
       },
       timeScale: {
         borderColor: '#374151',
-        timeVisible: chartData.interval.includes('h') || chartData.interval.includes('m'),
+        timeVisible: isIntraday,
+        secondsVisible: false,
       },
       rightPriceScale: {
         borderColor: '#374151',
@@ -45,7 +51,7 @@ export default function PriceChart({ chartData, technical }: Props) {
 
     // Candlestick series
     const candlestickData = chartData.bars.map((bar) => {
-      const time = parseTime(bar.time);
+      const time = parseTime(bar.time, isIntraday);
       return { time, open: bar.open, high: bar.high, low: bar.low, close: bar.close };
     });
 
@@ -61,7 +67,7 @@ export default function PriceChart({ chartData, technical }: Props) {
 
     // Volume
     const volumeData = chartData.bars.map((bar) => ({
-      time: parseTime(bar.time),
+      time: parseTime(bar.time, isIntraday),
       value: bar.volume,
       color: bar.close >= bar.open ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)',
     }));
@@ -77,7 +83,8 @@ export default function PriceChart({ chartData, technical }: Props) {
     // Moving average overlays
     if (technical?.moving_averages) {
       const maColors: Record<string, string> = {
-        'SMA-20': '#f59e0b', 'SMA-50': '#3b82f6', 'SMA-100': '#8b5cf6', 'SMA-200': '#ef4444',
+        'SMA-20': '#f59e0b', 'SMA-50': '#3b82f6', 'SMA-100': '#8b5cf6',
+        'SMA-120': '#a855f7', 'SMA-200': '#ef4444',
         'EMA-12': '#06b6d4', 'EMA-26': '#d946ef', 'EMA-50': '#14b8a6',
       };
 
@@ -86,7 +93,6 @@ export default function PriceChart({ chartData, technical }: Props) {
         const key = `${ma.type}-${ma.period}`;
         const color = maColors[key] || '#6b7280';
 
-        // Create a horizontal line at the MA value
         candleSeries.createPriceLine({
           price: ma.value,
           color,
@@ -112,21 +118,30 @@ export default function PriceChart({ chartData, technical }: Props) {
       chart.remove();
       chartRef.current = null;
     };
-  }, [chartData, technical]);
+  }, [chartData, technical, isIntraday]);
 
   return <div ref={containerRef} className="w-full rounded-lg overflow-hidden" />;
 }
 
-function parseTime(timeStr: string): string {
-  // Convert ISO datetime to YYYY-MM-DD for daily data
+/**
+ * For intraday data: return unix timestamp (seconds) so Lightweight Charts
+ * can distinguish multiple bars within the same day.
+ * For daily/weekly: return "YYYY-MM-DD" business day string.
+ */
+function parseTime(timeStr: string, intraday: boolean): string | number {
+  if (intraday) {
+    const d = new Date(timeStr);
+    if (!isNaN(d.getTime())) {
+      return Math.floor(d.getTime() / 1000);
+    }
+  }
+  // Daily / weekly: extract date portion
   if (timeStr.includes('T')) {
     return timeStr.split('T')[0];
   }
-  // Already a date
   if (/^\d{4}-\d{2}-\d{2}$/.test(timeStr)) {
     return timeStr;
   }
-  // Try to parse and format
   const date = new Date(timeStr);
   if (!isNaN(date.getTime())) {
     return date.toISOString().split('T')[0];
