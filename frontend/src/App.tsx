@@ -10,6 +10,7 @@ import FundamentalDashboard from './components/fundamental/FundamentalDashboard'
 import TechnicalDashboard from './components/technical/TechnicalDashboard';
 import ScorecardDashboard from './components/scorecard/ScorecardDashboard';
 import LoadingSpinner from './components/common/LoadingSpinner';
+import ErrorBoundary from './components/common/ErrorBoundary';
 import { useCompanyOverview, useFundamental, useScorecard, useNews } from './hooks/useStockData';
 
 export default function App() {
@@ -49,12 +50,12 @@ export default function App() {
         )}
 
         {/* Loading */}
-        {ticker && isLoading && (
+        {ticker && isLoading && !companyError && (
           <LoadingSpinner message={`Analyzing ${ticker}...`} />
         )}
 
         {/* Error */}
-        {companyError && (
+        {ticker && companyError && !isLoading && (
           <div className="card border-red-500/30 text-center py-8">
             <p className="text-red-400 font-medium">
               Could not find ticker &quot;{ticker}&quot;
@@ -66,38 +67,42 @@ export default function App() {
         )}
 
         {/* Content */}
-        {company && (
+        {company && !companyError && (
           <>
             <CompanyHeader company={company} />
             <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} isEtf={isEtf} />
 
             {activeTab === 'overview' && (
-              <div className="space-y-6">
-                {scorecard && <OverallScorecard scorecard={scorecard} />}
-                {scorecardLoading && <LoadingSpinner message="Computing scorecard..." />}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <QuickStats company={company} />
-                  <NewsFeed articles={news ?? []} />
+              <ErrorBoundary>
+                <div className="space-y-6">
+                  {scorecard && <OverallScorecard scorecard={scorecard} />}
+                  {scorecardLoading && <LoadingSpinner message="Computing scorecard..." />}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <QuickStats company={company} />
+                    <NewsFeed articles={news ?? []} />
+                  </div>
                 </div>
-              </div>
+              </ErrorBoundary>
             )}
 
             {activeTab === 'fundamental' && !isEtf && (
-              <>
+              <ErrorBoundary>
                 {fundLoading && <LoadingSpinner message="Analyzing fundamentals..." />}
                 {fundamental && <FundamentalDashboard data={fundamental} />}
-              </>
+              </ErrorBoundary>
             )}
 
             {activeTab === 'technical' && (
-              <TechnicalDashboard ticker={ticker} />
+              <ErrorBoundary>
+                <TechnicalDashboard ticker={ticker} />
+              </ErrorBoundary>
             )}
 
             {activeTab === 'scorecard' && (
-              <>
+              <ErrorBoundary>
                 {scorecardLoading && <LoadingSpinner message="Generating scorecard..." />}
                 {scorecard && <ScorecardDashboard data={scorecard} />}
-              </>
+              </ErrorBoundary>
             )}
           </>
         )}

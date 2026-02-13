@@ -37,6 +37,17 @@ logger = logging.getLogger(__name__)
 
 def _interpolate(value: float, breakpoints: list[tuple[float, float]]) -> float:
     """Smooth linear interpolation between breakpoints [(input_value, score), ...]."""
+    import math
+
+    # Validate input value
+    if not isinstance(value, (int, float)) or math.isnan(value) or math.isinf(value):
+        return 50.0  # Return neutral score for invalid input
+
+    # Validate breakpoints
+    for v, s in breakpoints:
+        if math.isnan(v) or math.isinf(v) or math.isnan(s) or math.isinf(s):
+            return 50.0  # Return neutral score if breakpoints are invalid
+
     if value <= breakpoints[0][0]:
         return float(breakpoints[0][1])
     if value >= breakpoints[-1][0]:
@@ -45,6 +56,8 @@ def _interpolate(value: float, breakpoints: list[tuple[float, float]]) -> float:
         v1, s1 = breakpoints[i]
         v2, s2 = breakpoints[i + 1]
         if v1 <= value <= v2:
+            if v2 - v1 == 0:  # Prevent division by zero
+                return float(s1)
             t = (value - v1) / (v2 - v1)
             return round(s1 + t * (s2 - s1), 1)
     return 50.0
@@ -84,9 +97,9 @@ class FundamentalAnalyzer:
 
         # Compute sub-scores
         valuation = self._score_valuation(info, financials, data_gaps, benchmarks)
-        growth = self._score_growth(info, financials, data_gaps)
+        growth = self._score_growth(info, financials, data_gaps, get_benchmark(info.get("sector")))
         health = self._score_health(info, financials, data_gaps)
-        profitability = self._score_profitability(info, financials, data_gaps)
+        profitability = self._score_profitability(info, financials, data_gaps, benchmarks)
 
         # Overall: redistribute weight among sub-scores that have data
         sub_scores = [
@@ -483,11 +496,11 @@ class FundamentalAnalyzer:
 
     # ── Growth Scoring ───────────────────────────────────────────────
 
-    def _score_growth(self, info: dict, financials: dict, data_gaps: list) -> GrowthMetrics:
-        rev_yoy = self._score_revenue_yoy(info, financials, data_gaps)
-        earn_yoy = self._score_earnings_yoy(info, financials, data_gaps)
+    def _score_growth(self, info: dict, financials: dict, data_gaps: list, sector_benchmarks: dict) -> GrowthMetrics:
+        rev_yoy = self._score_revenue_yoy(info, financials, data_gaps, sector_benchmarks)
+        earn_yoy = self._score_earnings_yoy(info, financials, data_gaps, sector_benchmarks)
         rev_trend = self._score_revenue_trend(financials, data_gaps)
-        analyst = self._score_analyst_growth(info, data_gaps)
+        analyst = self._score_analyst_growth(info, data_gaps, sector_benchmarks)
 
         composite = _weighted_average([
             (rev_yoy, 0.30), (earn_yoy, 0.30), (rev_trend, 0.15), (analyst, 0.25),
@@ -501,7 +514,32 @@ class FundamentalAnalyzer:
             grade=score_to_grade(composite),
         )
 
-    def _score_revenue_yoy(self, info: dict, financials: dict, data_gaps: list) -> MetricScore:
+    def _sector_relative_growth_score(self, pct: float, benchmark: float) -> float:
+        """
+        Score a growth rate relative to sector benchmark using linear interpolation.
+        ratio = actual_growth / sector_benchmark; higher ratio = better score.
+        Falls back to absolute scoring if benchmark is non-positive.
+        """
+        if benchmark <= 0:
+            return self._growth_rate_score(pct)
+        ratio = pct / benchmark
+        breakpoints = [
+            (0.0, 5), (0.3, 15), (0.5, 30), (0.7, 45), (0.9, 55),
+            (1.0, 65), (1.2, 80), (1.5, 90), (2.0, 95),
+        ]
+        if ratio <= breakpoints[0][0]:
+            return float(breakpoints[0][1])
+        if ratio >= breakpoints[-1][0]:
+            return float(breakpoints[-1][1])
+        for i in range(len(breakpoints) - 1):
+            r1, s1 = breakpoints[i]
+            r2, s2 = breakpoints[i + 1]
+            if r1 <= ratio <= r2:
+                t = (ratio - r1) / (r2 - r1) if r2 > r1 else 0
+                return round(s1 + t * (s2 - s1), 1)
+        return 50.0
+
+    def _score_revenue_yoy(self, info: dict, financials: dict, data_gaps: list, sector_benchmarks: dict) -> MetricScore:
         growth = info.get("revenueGrowth")
         if growth is None:
             growth = self._calc_yoy_growth(financials, "Total Revenue", "TotalRevenue")
@@ -509,11 +547,14 @@ class FundamentalAnalyzer:
             data_gaps.append("Revenue YoY")
             return MetricScore(description="Not available")
         pct = growth * 100
-        score = self._growth_rate_score(pct)
+        benchmark = sector_benchmarks.get("revenue_growth", 8)
+        absolute_score = self._growth_rate_score(pct)
+        relative_score = self._sector_relative_growth_score(pct, benchmark)
+        score = round((absolute_score + relative_score) / 2, 1)
         return MetricScore(value=round(pct, 1), score=score, grade=score_to_grade(score),
-                           description=f"{pct:+.1f}% YoY")
+                           description=f"{pct:+.1f}% YoY (sector avg: {benchmark}%)")
 
-    def _score_earnings_yoy(self, info: dict, financials: dict, data_gaps: list) -> MetricScore:
+    def _score_earnings_yoy(self, info: dict, financials: dict, data_gaps: list, sector_benchmarks: dict) -> MetricScore:
         growth = info.get("earningsGrowth")
         if growth is None:
             growth = self._calc_yoy_growth(financials, "Net Income", "NetIncome")
@@ -521,9 +562,12 @@ class FundamentalAnalyzer:
             data_gaps.append("Earnings YoY")
             return MetricScore(description="Not available")
         pct = growth * 100
-        score = self._growth_rate_score(pct)
+        benchmark = sector_benchmarks.get("earnings_growth", 10)
+        absolute_score = self._growth_rate_score(pct)
+        relative_score = self._sector_relative_growth_score(pct, benchmark)
+        score = round((absolute_score + relative_score) / 2, 1)
         return MetricScore(value=round(pct, 1), score=score, grade=score_to_grade(score),
-                           description=f"{pct:+.1f}% YoY")
+                           description=f"{pct:+.1f}% YoY (sector avg: {benchmark}%)")
 
     def _score_revenue_trend(self, financials: dict, data_gaps: list) -> MetricScore:
         quarterly = financials.get("quarterly_income")
@@ -568,16 +612,19 @@ class FundamentalAnalyzer:
         return MetricScore(value=round(growth_rates[0] * 100, 1) if growth_rates else None,
                            score=score, grade=score_to_grade(score), description=desc)
 
-    def _score_analyst_growth(self, info: dict, data_gaps: list) -> MetricScore:
+    def _score_analyst_growth(self, info: dict, data_gaps: list, sector_benchmarks: dict) -> MetricScore:
         growth = info.get("earningsGrowth")
         target = info.get("targetMeanPrice")
         current = info.get("currentPrice") or info.get("regularMarketPrice")
 
         if growth:
             pct = growth * 100
-            score = self._growth_rate_score(pct)
+            benchmark = sector_benchmarks.get("earnings_growth", 10)
+            absolute_score = self._growth_rate_score(pct)
+            relative_score = self._sector_relative_growth_score(pct, benchmark)
+            score = round((absolute_score + relative_score) / 2, 1)
             return MetricScore(value=round(pct, 1), score=score, grade=score_to_grade(score),
-                               description=f"Analyst est. {pct:+.1f}%")
+                               description=f"Analyst est. {pct:+.1f}% (sector avg: {benchmark}%)")
         elif target and current and current > 0:
             upside = ((target - current) / current) * 100
             score = clamp(50 + upside, 0, 100)
@@ -905,10 +952,14 @@ class FundamentalAnalyzer:
 
     # ── Profitability Scoring ────────────────────────────────────────
 
-    def _score_profitability(self, info: dict, financials: dict, data_gaps: list) -> ProfitabilityMetrics:
-        gm = self._score_gross_margin(info, data_gaps)
-        om = self._score_operating_margin(info, data_gaps)
-        nm = self._score_net_margin(info, data_gaps)
+    def _score_profitability(self, info: dict, financials: dict, data_gaps: list, benchmarks: dict) -> ProfitabilityMetrics:
+        # Extract sector for sector-relative margin scoring
+        sector = info.get("sector")
+        sector_benchmarks = get_benchmark(sector)
+
+        gm = self._score_gross_margin(info, data_gaps, sector_benchmarks)
+        om = self._score_operating_margin(info, data_gaps, sector_benchmarks)
+        nm = self._score_net_margin(info, data_gaps, sector_benchmarks)
         mt = self._score_margin_trend(info, financials, data_gaps)
 
         composite = _weighted_average([
@@ -923,62 +974,172 @@ class FundamentalAnalyzer:
             grade=score_to_grade(composite),
         )
 
-    def _score_gross_margin(self, info: dict, data_gaps: list) -> MetricScore:
+    def _score_gross_margin(self, info: dict, data_gaps: list, sector_benchmarks: dict) -> MetricScore:
+        """
+        Score gross margin relative to sector benchmark.
+        Higher margins are better, so we invert the score_relative logic.
+        """
         gm = info.get("grossMargins")
         if gm is None:
             data_gaps.append("Gross Margin")
             return MetricScore(description="Not available")
-        pct = gm * 100
-        if pct > 60:
-            score = 90
-        elif pct > 40:
-            score = 75
-        elif pct > 25:
-            score = 55
-        elif pct > 10:
-            score = 35
-        else:
-            score = 15
-        return MetricScore(value=round(pct, 1), score=score, grade=score_to_grade(score),
-                           description=f"Gross margin {pct:.1f}%")
 
-    def _score_operating_margin(self, info: dict, data_gaps: list) -> MetricScore:
+        pct = gm * 100
+        benchmark = sector_benchmarks.get("gross_margin", 40)  # Default 40% if not in benchmarks
+
+        # For margins, higher is better, so we use inverted ratio
+        # If actual > benchmark, score should be higher
+        if benchmark > 0:
+            ratio = pct / benchmark
+            # Use interpolation breakpoints where ratio > 1 = better
+            breakpoints = [
+                (0.0, 5),   # 0% margin = terrible
+                (0.3, 15),  # 30% of sector avg = poor
+                (0.5, 30),  # 50% of sector avg = below average
+                (0.7, 45),  # 70% of sector avg = fair
+                (0.9, 55),  # 90% of sector avg = decent
+                (1.0, 65),  # At sector avg = good
+                (1.2, 80),  # 20% above avg = very good
+                (1.5, 90),  # 50% above avg = excellent
+                (2.0, 95),  # 2x sector avg = exceptional
+            ]
+
+            # Linear interpolation
+            if ratio <= breakpoints[0][0]:
+                score = float(breakpoints[0][1])
+            elif ratio >= breakpoints[-1][0]:
+                score = float(breakpoints[-1][1])
+            else:
+                for i in range(len(breakpoints) - 1):
+                    r1, s1 = breakpoints[i]
+                    r2, s2 = breakpoints[i + 1]
+                    if r1 <= ratio <= r2:
+                        t = (ratio - r1) / (r2 - r1) if r2 > r1 else 0
+                        score = round(s1 + t * (s2 - s1), 1)
+                        break
+                else:
+                    score = 50.0
+        else:
+            # Fallback to absolute thresholds if no valid benchmark
+            if pct > 60:
+                score = 90
+            elif pct > 40:
+                score = 75
+            elif pct > 25:
+                score = 55
+            elif pct > 10:
+                score = 35
+            else:
+                score = 15
+
+        return MetricScore(
+            value=round(pct, 1),
+            score=score,
+            grade=score_to_grade(score),
+            description=f"Gross margin {pct:.1f}% (sector avg: {benchmark:.0f}%)"
+        )
+
+    def _score_operating_margin(self, info: dict, data_gaps: list, sector_benchmarks: dict) -> MetricScore:
+        """Score operating margin relative to sector benchmark."""
         om = info.get("operatingMargins")
         if om is None:
             data_gaps.append("Operating Margin")
             return MetricScore(description="Not available")
-        pct = om * 100
-        if pct > 30:
-            score = 90
-        elif pct > 20:
-            score = 75
-        elif pct > 10:
-            score = 60
-        elif pct > 0:
-            score = 40
-        else:
-            score = 15
-        return MetricScore(value=round(pct, 1), score=score, grade=score_to_grade(score),
-                           description=f"Operating margin {pct:.1f}%")
 
-    def _score_net_margin(self, info: dict, data_gaps: list) -> MetricScore:
+        pct = om * 100
+        benchmark = sector_benchmarks.get("operating_margin", 15)
+
+        if benchmark > 0:
+            ratio = pct / benchmark
+            breakpoints = [
+                (0.0, 5), (0.3, 15), (0.5, 30), (0.7, 45), (0.9, 55),
+                (1.0, 65), (1.2, 80), (1.5, 90), (2.0, 95),
+            ]
+
+            if ratio <= breakpoints[0][0]:
+                score = float(breakpoints[0][1])
+            elif ratio >= breakpoints[-1][0]:
+                score = float(breakpoints[-1][1])
+            else:
+                for i in range(len(breakpoints) - 1):
+                    r1, s1 = breakpoints[i]
+                    r2, s2 = breakpoints[i + 1]
+                    if r1 <= ratio <= r2:
+                        t = (ratio - r1) / (r2 - r1) if r2 > r1 else 0
+                        score = round(s1 + t * (s2 - s1), 1)
+                        break
+                else:
+                    score = 50.0
+        else:
+            # Fallback
+            if pct > 30:
+                score = 90
+            elif pct > 20:
+                score = 75
+            elif pct > 10:
+                score = 60
+            elif pct > 0:
+                score = 40
+            else:
+                score = 15
+
+        return MetricScore(
+            value=round(pct, 1),
+            score=score,
+            grade=score_to_grade(score),
+            description=f"Operating margin {pct:.1f}% (sector avg: {benchmark:.0f}%)"
+        )
+
+    def _score_net_margin(self, info: dict, data_gaps: list, sector_benchmarks: dict) -> MetricScore:
+        """Score net margin relative to sector benchmark."""
         nm = info.get("profitMargins")
         if nm is None:
             data_gaps.append("Net Margin")
             return MetricScore(description="Not available")
+
         pct = nm * 100
-        if pct > 25:
-            score = 90
-        elif pct > 15:
-            score = 75
-        elif pct > 8:
-            score = 60
-        elif pct > 0:
-            score = 40
+        benchmark = sector_benchmarks.get("net_margin", 10)
+
+        if benchmark > 0:
+            ratio = pct / benchmark
+            breakpoints = [
+                (0.0, 5), (0.3, 15), (0.5, 30), (0.7, 45), (0.9, 55),
+                (1.0, 65), (1.2, 80), (1.5, 90), (2.0, 95),
+            ]
+
+            if ratio <= breakpoints[0][0]:
+                score = float(breakpoints[0][1])
+            elif ratio >= breakpoints[-1][0]:
+                score = float(breakpoints[-1][1])
+            else:
+                for i in range(len(breakpoints) - 1):
+                    r1, s1 = breakpoints[i]
+                    r2, s2 = breakpoints[i + 1]
+                    if r1 <= ratio <= r2:
+                        t = (ratio - r1) / (r2 - r1) if r2 > r1 else 0
+                        score = round(s1 + t * (s2 - s1), 1)
+                        break
+                else:
+                    score = 50.0
         else:
-            score = 15
-        return MetricScore(value=round(pct, 1), score=score, grade=score_to_grade(score),
-                           description=f"Net margin {pct:.1f}%")
+            # Fallback
+            if pct > 25:
+                score = 90
+            elif pct > 15:
+                score = 75
+            elif pct > 8:
+                score = 60
+            elif pct > 0:
+                score = 40
+            else:
+                score = 15
+
+        return MetricScore(
+            value=round(pct, 1),
+            score=score,
+            grade=score_to_grade(score),
+            description=f"Net margin {pct:.1f}% (sector avg: {benchmark:.0f}%)"
+        )
 
     def _score_margin_trend(self, info: dict, financials: dict, data_gaps: list) -> MetricScore:
         quarterly = financials.get("quarterly_income", {})
@@ -1023,6 +1184,10 @@ class FundamentalAnalyzer:
     # ── Helpers ───────────────────────────────────────────────────────
 
     def _growth_rate_score(self, pct: float) -> float:
+        """
+        Score growth rates with granular handling of negative values.
+        Differentiates between mild decline (-5%), moderate (-20%), and severe (-50%+).
+        """
         if pct > 50:
             return 95
         elif pct > 25:
@@ -1033,10 +1198,18 @@ class FundamentalAnalyzer:
             return 55
         elif pct > 0:
             return 45
+        elif pct > -5:
+            return 35  # Slight decline
         elif pct > -10:
-            return 30
+            return 25  # Mild decline
+        elif pct > -20:
+            return 15  # Moderate decline
+        elif pct > -30:
+            return 10  # Serious decline
+        elif pct > -50:
+            return 5   # Severe decline
         else:
-            return 10
+            return 1   # Catastrophic decline (>50% revenue/earnings loss)
 
     def _calc_yoy_growth(self, financials: dict, *field_names) -> float | None:
         income = financials.get("income_statement", {})

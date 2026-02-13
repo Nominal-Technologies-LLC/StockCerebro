@@ -8,9 +8,20 @@ interface Props {
 }
 
 export default function MetricCard({ label, metric, format }: Props) {
-  const displayValue = metric.value != null
-    ? (format ? format(metric.value) : metric.value.toFixed(2))
-    : 'N/A';
+  let displayValue: string;
+
+  if (metric.value == null) {
+    displayValue = 'N/A';
+  } else if (format) {
+    try {
+      displayValue = format(metric.value);
+    } catch (error) {
+      console.error(`Error formatting metric "${label}":`, error);
+      displayValue = metric.value.toString();
+    }
+  } else {
+    displayValue = metric.value.toFixed(2);
+  }
 
   return (
     <div className="card flex items-center justify-between">

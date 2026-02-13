@@ -30,14 +30,18 @@ def calculate_peg(info: dict, financials: dict) -> tuple[float | None, str]:
 
     # Check for analyst growth data
     if five_yr_growth and five_yr_growth > 0:
-        peg = trailing_pe / (five_yr_growth * 100)
-        return round(peg, 2), "analyst_estimate"
+        growth_percent = five_yr_growth * 100
+        if growth_percent > 0:  # Extra safety check
+            peg = trailing_pe / growth_percent
+            return round(peg, 2), "analyst_estimate"
 
     # Method 2: Trailing 3-year EPS CAGR
     eps_growth = _calc_trailing_eps_growth(financials)
     if eps_growth and eps_growth > 0:
-        peg = trailing_pe / (eps_growth * 100)
-        return round(peg, 2), "trailing_3yr"
+        growth_percent = eps_growth * 100
+        if growth_percent > 0:  # Extra safety check
+            peg = trailing_pe / growth_percent
+            return round(peg, 2), "trailing_3yr"
 
     return None, "unavailable"
 

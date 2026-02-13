@@ -32,6 +32,42 @@ def _is_market_hours() -> bool:
     return 14 <= hour < 21
 
 
+def _seconds_until_market_close() -> int:
+    """
+    Calculate seconds until next market close (4pm ET / 21:00 UTC).
+    Used for cache expiration tied to market hours.
+
+    Note: This uses simplified market hours (ignoring DST transitions).
+    Market close is at 21:00 UTC on trading days (Mon-Fri).
+    """
+    now = datetime.now(timezone.utc)
+    weekday = now.weekday()  # 0=Monday, 6=Sunday
+
+    # Market close today (21:00 UTC)
+    today_close = now.replace(hour=21, minute=0, second=0, microsecond=0)
+
+    # If it's the weekend (Sat=5, Sun=6), expire at next Monday's close
+    if weekday == 5:  # Saturday
+        days_until_monday = 2
+        next_close = today_close + timedelta(days=days_until_monday)
+    elif weekday == 6:  # Sunday
+        days_until_monday = 1
+        next_close = today_close + timedelta(days=days_until_monday)
+    # Weekday logic
+    elif now >= today_close:
+        # After market close today, expire at next trading day close
+        if weekday == 4:  # Friday after close
+            next_close = today_close + timedelta(days=3)  # Monday
+        else:
+            next_close = today_close + timedelta(days=1)  # Next day
+    else:
+        # Before market close today, expire at today's close
+        next_close = today_close
+
+    seconds_until = (next_close - now).total_seconds()
+    return int(max(seconds_until, 60))  # Minimum 1 minute TTL
+
+
 class CacheManager:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -221,14 +257,20 @@ class CacheManager:
 
     # --- Peer Cache ---
 
-    async def get_peer_benchmarks(self, ticker: str, ttl: int = 86400) -> dict | None:
-        """Return cached peer data: {"peers": [...], "medians": {"pe": X, ...}, "source": "peers"|"sector"}."""
+    async def get_peer_benchmarks(self, ticker: str) -> dict | None:
+        """
+        Return cached peer data: {"peers": [...], "medians": {"pe": X, ...}, "source": "peers"|"sector"}.
+        Cache expires at next market close to ensure fresh peer comparisons.
+        """
         result = await self.db.execute(
             select(PeerCache).where(PeerCache.ticker == ticker)
         )
         cached = result.scalar_one_or_none()
-        if cached and not _is_stale(cached.fetched_at, ttl):
-            return cached.peers if cached.peers else None
+        if cached:
+            # Use market-close-based TTL for peer benchmarks
+            ttl = _seconds_until_market_close()
+            if not _is_stale(cached.fetched_at, ttl):
+                return cached.peers if cached.peers else None
         return None
 
     async def set_peer_benchmarks(self, ticker: str, data: dict):

@@ -152,6 +152,8 @@ class DataAggregator:
         cached = await self.cache.get_prices(ticker, interval, period)
         if cached:
             bars = [OHLCVBar(**b) for b in cached.get("bars", [])]
+            # Ensure bars are sorted by timestamp
+            bars.sort(key=lambda b: b.time)
             return ChartData(ticker=ticker, period=period, interval=interval, bars=bars)
 
         # Primary: Yahoo v8 chart API (reliable)
@@ -160,6 +162,8 @@ class DataAggregator:
             raw_bars = result["bars"]
             await self.cache.set_prices(ticker, interval, period, {"bars": raw_bars})
             bars = [OHLCVBar(**b) for b in raw_bars]
+            # Ensure bars are sorted by timestamp
+            bars.sort(key=lambda b: b.time)
             return ChartData(ticker=ticker, period=period, interval=interval, bars=bars)
 
         # Fallback: yfinance
@@ -167,6 +171,8 @@ class DataAggregator:
         if raw_bars:
             await self.cache.set_prices(ticker, interval, period, {"bars": raw_bars})
             bars = [OHLCVBar(**b) for b in raw_bars]
+            # Ensure bars are sorted by timestamp
+            bars.sort(key=lambda b: b.time)
             return ChartData(ticker=ticker, period=period, interval=interval, bars=bars)
 
         return None

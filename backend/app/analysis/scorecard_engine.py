@@ -29,7 +29,8 @@ class ScorecardEngine:
         if not tech_daily:
             return None
 
-        daily_score = tech_daily.overall_score if tech_daily else 50
+        # tech_daily is guaranteed to exist here due to early return above
+        daily_score = tech_daily.overall_score
         weekly_score = tech_weekly.overall_score if tech_weekly else 50
         hourly_score = tech_hourly.overall_score if tech_hourly else 50
         tech_consensus = daily_score * 0.50 + weekly_score * 0.35 + hourly_score * 0.15
@@ -131,7 +132,9 @@ class ScorecardEngine:
         risk = price - stop_loss
         reward = target - price
         if risk <= 0:
-            return SwingTradeAssessment(reasoning=["Price below stop loss level"])
+            return SwingTradeAssessment(
+                reasoning=["Price at or below stop loss level - excessive risk"]
+            )
 
         rr_ratio = reward / risk
 
