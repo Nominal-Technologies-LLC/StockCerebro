@@ -6,6 +6,7 @@ import type {
   TechnicalAnalysis,
   Scorecard,
   NewsArticle,
+  EarningsResponse,
 } from '../types/stock';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -53,6 +54,11 @@ export async function fetchScorecard(ticker: string): Promise<Scorecard> {
 
 export async function fetchNews(ticker: string): Promise<NewsArticle[]> {
   const { data } = await api.get(`/api/stock/${ticker}/news`);
+  return data;
+}
+
+export async function fetchEarnings(ticker: string): Promise<EarningsResponse> {
+  const { data } = await api.get(`/api/stock/${ticker}/earnings`);
   return data;
 }
 

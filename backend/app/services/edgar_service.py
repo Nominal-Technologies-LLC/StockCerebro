@@ -49,7 +49,7 @@ class EdgarService:
         return await self._get(f"{self.SUBMISSIONS_URL}/CIK{cik_padded}.json")
 
     async def lookup_cik(self, ticker: str) -> str | None:
-        data = await self._get(f"{self.BASE_URL}/files/company_tickers.json")
+        data = await self._get("https://www.sec.gov/files/company_tickers.json")
         if not data:
             return None
         for entry in data.values():

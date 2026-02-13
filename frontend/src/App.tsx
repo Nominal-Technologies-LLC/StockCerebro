@@ -7,11 +7,12 @@ import QuickStats from './components/overview/QuickStats';
 import OverallScorecard from './components/overview/OverallScorecard';
 import NewsFeed from './components/overview/NewsFeed';
 import FundamentalDashboard from './components/fundamental/FundamentalDashboard';
+import EarningsDashboard from './components/earnings/EarningsDashboard';
 import TechnicalDashboard from './components/technical/TechnicalDashboard';
 import ScorecardDashboard from './components/scorecard/ScorecardDashboard';
 import LoadingSpinner from './components/common/LoadingSpinner';
 import ErrorBoundary from './components/common/ErrorBoundary';
-import { useCompanyOverview, useFundamental, useScorecard, useNews } from './hooks/useStockData';
+import { useCompanyOverview, useFundamental, useEarnings, useScorecard, useNews } from './hooks/useStockData';
 
 export default function App() {
   const [ticker, setTicker] = useState('');
@@ -20,6 +21,7 @@ export default function App() {
   const { data: company, isLoading: companyLoading, error: companyError } = useCompanyOverview(ticker);
   const isEtf = company?.is_etf ?? false;
   const { data: fundamental, isLoading: fundLoading } = useFundamental(isEtf ? '' : ticker);
+  const { data: earnings, isLoading: earningsLoading } = useEarnings(isEtf ? '' : ticker);
   const { data: scorecard, isLoading: scorecardLoading } = useScorecard(ticker);
   const { data: news } = useNews(ticker);
 
@@ -89,6 +91,13 @@ export default function App() {
               <ErrorBoundary>
                 {fundLoading && <LoadingSpinner message="Analyzing fundamentals..." />}
                 {fundamental && <FundamentalDashboard data={fundamental} />}
+              </ErrorBoundary>
+            )}
+
+            {activeTab === 'earnings' && !isEtf && (
+              <ErrorBoundary>
+                {earningsLoading && <LoadingSpinner message="Loading earnings..." />}
+                {earnings && <EarningsDashboard data={earnings} />}
               </ErrorBoundary>
             )}
 

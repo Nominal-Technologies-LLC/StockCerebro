@@ -193,6 +193,27 @@ export interface NewsArticle {
   summary: string;
 }
 
+export interface QuarterlyEarnings {
+  period_end: string;
+  period_label: string;
+  revenue: number | null;
+  net_income: number | null;
+  operating_income: number | null;
+  operating_margin: number | null;
+  revenue_qoq: number | null;
+  net_income_qoq: number | null;
+  revenue_yoy: number | null;
+  net_income_yoy: number | null;
+  filing_url: string | null;
+  filing_date: string | null;
+}
+
+export interface EarningsResponse {
+  ticker: string;
+  quarters: QuarterlyEarnings[];
+  data_source: string;
+}
+
 export interface Scorecard {
   ticker: string;
   overall_score: number;

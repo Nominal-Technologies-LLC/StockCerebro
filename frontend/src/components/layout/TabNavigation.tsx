@@ -8,11 +8,12 @@ const allTabs = [
   { id: 'overview', label: 'Overview' },
   { id: 'fundamental', label: 'Fundamental' },
   { id: 'technical', label: 'Technical' },
+  { id: 'earnings', label: 'Earnings' },
   { id: 'scorecard', label: 'Scorecard' },
 ];
 
 export default function TabNavigation({ activeTab, onTabChange, isEtf }: Props) {
-  const tabs = isEtf ? allTabs.filter((t) => t.id !== 'fundamental') : allTabs;
+  const tabs = isEtf ? allTabs.filter((t) => t.id !== 'fundamental' && t.id !== 'earnings') : allTabs;
 
   return (
     <nav className="flex gap-1 border-b border-gray-800 mb-4">

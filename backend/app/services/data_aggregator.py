@@ -1,9 +1,10 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.schemas.earnings import EarningsResponse, QuarterlyEarnings
 from app.schemas.fundamental import FundamentalAnalysis
 from app.schemas.scorecard import NewsArticle, Scorecard
 from app.schemas.stock import ChartData, CompanyOverview, OHLCVBar
@@ -26,6 +27,80 @@ def _epoch_to_iso(epoch) -> str:
         return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     except (ValueError, TypeError, OSError):
         return str(epoch)
+
+
+def _pct_change(current, prior) -> float | None:
+    """Compute percentage change, handling None and zero."""
+    if current is None or prior is None or prior == 0:
+        return None
+    return ((current - prior) / abs(prior)) * 100
+
+
+def _period_to_label(period_end: str) -> str:
+    """Convert a period end date like '2024-12-28' to 'Q4 2024'."""
+    try:
+        dt = datetime.strptime(period_end, "%Y-%m-%d")
+        month = dt.month
+        year = dt.year
+        if month <= 3:
+            return f"Q1 {year}"
+        elif month <= 6:
+            return f"Q2 {year}"
+        elif month <= 9:
+            return f"Q3 {year}"
+        else:
+            return f"Q4 {year}"
+    except (ValueError, TypeError):
+        return period_end
+
+
+def _find_yoy_index(periods: list[str], current_idx: int, quarterly: dict) -> int | None:
+    """Find the index of the same quarter from ~1 year ago (within 30-day tolerance)."""
+    if current_idx >= len(periods):
+        return None
+    try:
+        current_date = datetime.strptime(periods[current_idx], "%Y-%m-%d")
+        target_date = current_date - timedelta(days=365)
+
+        best_idx = None
+        best_diff = 40  # max tolerance in days
+        for j in range(current_idx + 1, len(periods)):
+            try:
+                candidate = datetime.strptime(periods[j], "%Y-%m-%d")
+                diff = abs((candidate - target_date).days)
+                if diff < best_diff:
+                    best_diff = diff
+                    best_idx = j
+            except (ValueError, TypeError):
+                continue
+        return best_idx
+    except (ValueError, TypeError):
+        return None
+
+
+def _match_filing(period_end: str, filing_map: dict[str, dict]) -> dict | None:
+    """Match a quarterly period end date to a filing, with 5-day fuzzy matching."""
+    # Exact match first
+    if period_end in filing_map:
+        return filing_map[period_end]
+
+    # Fuzzy match within 5 days
+    try:
+        target = datetime.strptime(period_end, "%Y-%m-%d")
+        best_match = None
+        best_diff = 6  # max 5 days
+        for date_str, filing in filing_map.items():
+            try:
+                candidate = datetime.strptime(date_str, "%Y-%m-%d")
+                diff = abs((candidate - target).days)
+                if diff < best_diff:
+                    best_diff = diff
+                    best_match = filing
+            except (ValueError, TypeError):
+                continue
+        return best_match
+    except (ValueError, TypeError):
+        return None
 
 
 class DataAggregator:
@@ -71,7 +146,7 @@ class DataAggregator:
                 if metric.get("dividendYieldIndicatedAnnual"):
                     quote["dividendYield"] = metric["dividendYieldIndicatedAnnual"] / 100
                 if metric.get("10DayAverageTradingVolume"):
-                    quote["averageVolume"] = metric["10DayAverageTradingVolume"] * 1_000_000
+                    quote["averageVolume"] = int(metric["10DayAverageTradingVolume"] * 1_000_000)
 
             # Map to standard keys for _build_overview
             info = self._normalize_yahoo_direct(quote)
@@ -124,6 +199,15 @@ class DataAggregator:
         instrument_type = (info.get("instrumentType") or "").upper()
         is_etf = instrument_type in ("ETF", "MUTUALFUND")
 
+        # Ensure volumes are integers (Finnhub can return floats with fractional parts)
+        volume = info.get("volume") or info.get("regularMarketVolume")
+        if volume is not None:
+            volume = int(volume)
+
+        avg_volume = info.get("averageVolume")
+        if avg_volume is not None:
+            avg_volume = int(avg_volume)
+
         return CompanyOverview(
             ticker=ticker,
             name=info.get("shortName") or info.get("longName"),
@@ -134,8 +218,8 @@ class DataAggregator:
             price=price,
             change=change,
             change_percent=change_pct,
-            volume=info.get("volume") or info.get("regularMarketVolume"),
-            avg_volume=info.get("averageVolume"),
+            volume=volume,
+            avg_volume=avg_volume,
             day_high=info.get("dayHigh") or info.get("regularMarketDayHigh"),
             day_low=info.get("dayLow") or info.get("regularMarketDayLow"),
             fifty_two_week_high=info.get("fiftyTwoWeekHigh"),
@@ -265,3 +349,158 @@ class DataAggregator:
             return [NewsArticle(**a) for a in articles]
 
         return []
+
+    # ── Earnings ─────────────────────────────────────────────────────
+
+    async def get_earnings(self, ticker: str) -> EarningsResponse | None:
+        # Check analysis cache (24h TTL)
+        cached = await self.cache.get_analysis(ticker, "earnings", ttl=86400)
+        if cached:
+            return EarningsResponse(**cached)
+
+        # Reuse the quarterly income pipeline from FundamentalAnalyzer
+        from app.analysis.fundamental_analyzer import FundamentalAnalyzer
+        analyzer = FundamentalAnalyzer(self.db, self.cache, self.yf, self.finnhub, self.edgar)
+        quarterly = await analyzer._get_quarterly_income(ticker)
+
+        if not quarterly or len(quarterly) < 1:
+            return None
+
+        # Determine data source from cache
+        data_source = "unknown"
+        for source in ("finnhub", "edgar"):
+            src_cached = await self.cache.get_fundamental(ticker, "quarterly_income", source=source)
+            if src_cached and len(src_cached) >= 1:
+                data_source = source
+                break
+
+        # Get SEC filing URLs (best-effort)
+        filing_map = await self._get_filing_urls(ticker)
+
+        # Build quarter list sorted most-recent-first
+        periods = sorted(quarterly.keys(), reverse=True)[:8]
+
+        quarters: list[QuarterlyEarnings] = []
+        for i, period in enumerate(periods):
+            q_data = quarterly[period]
+            revenue = q_data.get("Total Revenue") or q_data.get("TotalRevenue")
+            net_income = q_data.get("Net Income") or q_data.get("NetIncome")
+            op_income = q_data.get("Operating Income") or q_data.get("OperatingIncome") or q_data.get("EBIT")
+
+            op_margin = None
+            if revenue and op_income and revenue != 0:
+                op_margin = round((op_income / revenue) * 100, 2)
+
+            # QoQ deltas (compare to next item in list, which is the prior quarter)
+            rev_qoq = None
+            ni_qoq = None
+            if i + 1 < len(periods):
+                prior = quarterly[periods[i + 1]]
+                prior_rev = prior.get("Total Revenue") or prior.get("TotalRevenue")
+                prior_ni = prior.get("Net Income") or prior.get("NetIncome")
+                rev_qoq = _pct_change(revenue, prior_rev)
+                ni_qoq = _pct_change(net_income, prior_ni)
+
+            # YoY deltas (find same quarter from ~4 periods ago)
+            rev_yoy = None
+            ni_yoy = None
+            yoy_idx = _find_yoy_index(periods, i, quarterly)
+            if yoy_idx is not None:
+                yago = quarterly[periods[yoy_idx]]
+                yago_rev = yago.get("Total Revenue") or yago.get("TotalRevenue")
+                yago_ni = yago.get("Net Income") or yago.get("NetIncome")
+                rev_yoy = _pct_change(revenue, yago_rev)
+                ni_yoy = _pct_change(net_income, yago_ni)
+
+            # Match SEC filing
+            filing_url = None
+            filing_date = None
+            if filing_map:
+                match = _match_filing(period, filing_map)
+                if match:
+                    filing_url = match.get("url")
+                    filing_date = match.get("filed")
+
+            quarters.append(QuarterlyEarnings(
+                period_end=period,
+                period_label=_period_to_label(period),
+                revenue=revenue,
+                net_income=net_income,
+                operating_income=op_income,
+                operating_margin=op_margin,
+                revenue_qoq=round(rev_qoq, 2) if rev_qoq is not None else None,
+                net_income_qoq=round(ni_qoq, 2) if ni_qoq is not None else None,
+                revenue_yoy=round(rev_yoy, 2) if rev_yoy is not None else None,
+                net_income_yoy=round(ni_yoy, 2) if ni_yoy is not None else None,
+                filing_url=filing_url,
+                filing_date=filing_date,
+            ))
+
+        result = EarningsResponse(ticker=ticker, quarters=quarters, data_source=data_source)
+        await self.cache.set_analysis(ticker, "earnings", result.model_dump())
+        return result
+
+    async def _get_filing_urls(self, ticker: str) -> dict[str, dict] | None:
+        """
+        Get SEC 10-Q/10-K filing URLs mapped by report date.
+        Returns dict like {"2024-12-28": {"url": "...", "filed": "2025-01-30"}}
+        """
+        # Check cache
+        cached = await self.cache.get_fundamental(ticker, "filing_urls", source="edgar", ttl=86400)
+        if cached:
+            return cached
+
+        try:
+            # Get CIK (reuses existing cache)
+            cik_cache = await self.cache.get_fundamental(ticker, "cik_mapping", source="edgar", ttl=604800)
+            cik = cik_cache.get("cik") if cik_cache else None
+
+            if not cik:
+                cik = await self.edgar.lookup_cik(ticker)
+                if cik:
+                    await self.cache.set_fundamental(ticker, "cik_mapping", "edgar", {"cik": cik})
+
+            if not cik:
+                return None
+
+            submissions = await self.edgar.get_company_submissions(cik)
+            if not submissions:
+                return None
+
+            recent = submissions.get("filings", {}).get("recent", {})
+            forms = recent.get("form", [])
+            report_dates = recent.get("reportDate", [])
+            filing_dates = recent.get("filingDate", [])
+            accession_numbers = recent.get("accessionNumber", [])
+            primary_docs = recent.get("primaryDocument", [])
+
+            filing_map = {}
+            for i, form in enumerate(forms):
+                if form not in ("10-Q", "10-K"):
+                    continue
+                if i >= len(report_dates) or i >= len(accession_numbers) or i >= len(primary_docs):
+                    continue
+
+                report_date = report_dates[i]
+                accession_no = accession_numbers[i]
+                primary_doc = primary_docs[i]
+                filed = filing_dates[i] if i < len(filing_dates) else None
+
+                # Build SEC URL: remove hyphens from accession number for path
+                accession_no_dashes = accession_no.replace("-", "")
+                url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_no_dashes}/{primary_doc}"
+
+                filing_map[report_date] = {
+                    "url": url,
+                    "filed": filed,
+                    "form": form,
+                }
+
+            if filing_map:
+                await self.cache.set_fundamental(ticker, "filing_urls", "edgar", filing_map)
+
+            return filing_map if filing_map else None
+
+        except Exception as e:
+            logger.warning(f"Failed to get filing URLs for {ticker}: {e}")
+            return None

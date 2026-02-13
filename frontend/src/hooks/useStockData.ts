@@ -5,6 +5,7 @@ import {
   fetchTechnical,
   fetchScorecard,
   fetchNews,
+  fetchEarnings,
 } from '../api/client';
 import { getRefreshInterval } from '../utils/marketHours';
 
@@ -50,5 +51,14 @@ export function useNews(ticker: string) {
     queryFn: () => fetchNews(ticker),
     enabled: !!ticker,
     staleTime: 5 * 60_000,
+  });
+}
+
+export function useEarnings(ticker: string) {
+  return useQuery({
+    queryKey: ['earnings', ticker],
+    queryFn: () => fetchEarnings(ticker),
+    enabled: !!ticker,
+    staleTime: 10 * 60_000,
   });
 }

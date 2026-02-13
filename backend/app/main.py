@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.endpoints import stock, fundamental, technical, scorecard, news
+from app.api.endpoints import stock, fundamental, technical, scorecard, news, earnings
 
 logging.basicConfig(level=logging.INFO)
 
@@ -22,6 +22,7 @@ app.include_router(fundamental.router)
 app.include_router(technical.router)
 app.include_router(scorecard.router)
 app.include_router(news.router)
+app.include_router(earnings.router)
 
 
 @app.get("/api/health")
