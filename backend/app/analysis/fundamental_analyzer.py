@@ -4,9 +4,14 @@ Computes four equally weighted (25% each) sub-scores:
 - Valuation (Forward PE 30%, PEG 25%, P/S 20%, P/B 15%, Trailing PE 10%)
   — scored RELATIVE to sector/peer benchmarks, not absolute thresholds
   — PE and Forward PE are growth-adjusted: high-growth companies are allowed higher multiples
-- Growth (Revenue YoY 30%, Earnings YoY 30%, Revenue Trend 15%, Analyst Growth Est. 25%)
+- Growth (Revenue YoY 25%, Earnings YoY 25%, Revenue QoQ 12.5%, Earnings QoQ 12.5%, Analyst Growth Est. 25%)
 - Financial Health (Interest Coverage 20%, FCF Yield 30%, OCF Trend 25%, D/E 15%, Current Ratio 10%)
 - Profitability (Gross Margin 20%, Operating Margin 30%, Net Margin 25%, Margin Trend 25%)
+
+Quarterly data pipeline (Revenue QoQ, Earnings QoQ, Margin Trend):
+  1. Finnhub /stock/financials-reported (primary)
+  2. SEC EDGAR company_facts (fallback)
+  3. yfinance quarterly data (last resort)
 
 When a metric is missing (N/A), its weight is redistributed proportionally among
 the metrics that do have data, so missing data never drags down the score.
@@ -78,11 +83,12 @@ def _weighted_average(items: list[tuple[MetricScore, float]]) -> float:
 
 
 class FundamentalAnalyzer:
-    def __init__(self, db: AsyncSession, cache: CacheManager, yf: YFinanceService, finnhub: FinnhubService):
+    def __init__(self, db: AsyncSession, cache: CacheManager, yf: YFinanceService, finnhub: FinnhubService, edgar=None):
         self.db = db
         self.cache = cache
         self.yf = yf
         self.finnhub = finnhub
+        self.edgar = edgar
 
     async def analyze(self, ticker: str) -> FundamentalAnalysis | None:
         info = await self._get_info(ticker)
@@ -115,7 +121,7 @@ class FundamentalAnalyzer:
         else:
             overall = 0
 
-        total_metrics = 14
+        total_metrics = 15
         available_count = total_metrics - len(data_gaps)
         confidence = available_count / total_metrics
 
@@ -217,11 +223,75 @@ class FundamentalAnalyzer:
     async def _get_financials(self, ticker: str) -> dict:
         cached = await self.cache.get_fundamental(ticker, "financials")
         if cached:
-            return cached
-        data = await self.yf.get_financials(ticker)
-        if data:
-            await self.cache.set_fundamental(ticker, "financials", "yfinance", data)
-        return data or {}
+            data = cached
+        else:
+            data = await self.yf.get_financials(ticker)
+            if data:
+                await self.cache.set_fundamental(ticker, "financials", "yfinance", data)
+            else:
+                data = {}
+
+        # Enrich with quarterly income from Finnhub/EDGAR pipeline
+        quarterly = await self._get_quarterly_income(ticker)
+        if quarterly and len(quarterly) >= 3:
+            data["quarterly_income"] = quarterly
+        elif not data.get("quarterly_income"):
+            data["quarterly_income"] = quarterly or {}
+
+        return data
+
+    async def _get_quarterly_income(self, ticker: str) -> dict | None:
+        """
+        3-tier fallback for quarterly income data:
+        1. Cache (source=finnhub or edgar, 24h TTL)
+        2. Finnhub /stock/financials-reported
+        3. SEC EDGAR company_facts
+        """
+        from app.services.xbrl_mapper import parse_edgar_quarterly, parse_finnhub_quarterly
+
+        # Check cache for Finnhub or EDGAR quarterly data
+        for source in ("finnhub", "edgar"):
+            cached = await self.cache.get_fundamental(ticker, "quarterly_income", source=source)
+            if cached and len(cached) >= 3:
+                logger.debug(f"Using cached {source} quarterly data for {ticker} ({len(cached)} quarters)")
+                return cached
+
+        # Tier 2: Finnhub /stock/financials-reported
+        try:
+            reports = await self.finnhub.get_financials_reported(ticker)
+            if reports:
+                quarterly = parse_finnhub_quarterly(reports)
+                if quarterly and len(quarterly) >= 3:
+                    await self.cache.set_fundamental(ticker, "quarterly_income", "finnhub", quarterly)
+                    logger.info(f"Finnhub quarterly data for {ticker}: {len(quarterly)} quarters")
+                    return quarterly
+        except Exception as e:
+            logger.warning(f"Finnhub financials-reported failed for {ticker}: {e}")
+
+        # Tier 3: SEC EDGAR
+        if self.edgar:
+            try:
+                # Check for cached CIK mapping first
+                cik_cache = await self.cache.get_fundamental(ticker, "cik_mapping", source="edgar", ttl=604800)  # 7 days
+                cik = cik_cache.get("cik") if cik_cache else None
+
+                if not cik:
+                    cik = await self.edgar.lookup_cik(ticker)
+                    if cik:
+                        await self.cache.set_fundamental(ticker, "cik_mapping", "edgar", {"cik": cik})
+
+                if cik:
+                    facts = await self.edgar.get_company_facts(cik)
+                    if facts:
+                        quarterly = parse_edgar_quarterly(facts)
+                        if quarterly and len(quarterly) >= 3:
+                            await self.cache.set_fundamental(ticker, "quarterly_income", "edgar", quarterly)
+                            logger.info(f"EDGAR quarterly data for {ticker}: {len(quarterly)} quarters")
+                            return quarterly
+            except Exception as e:
+                logger.warning(f"EDGAR quarterly fetch failed for {ticker}: {e}")
+
+        return None
 
     async def _get_peer_benchmarks(self, ticker: str, info: dict) -> dict:
         """
@@ -499,16 +569,19 @@ class FundamentalAnalyzer:
     def _score_growth(self, info: dict, financials: dict, data_gaps: list, sector_benchmarks: dict) -> GrowthMetrics:
         rev_yoy = self._score_revenue_yoy(info, financials, data_gaps, sector_benchmarks)
         earn_yoy = self._score_earnings_yoy(info, financials, data_gaps, sector_benchmarks)
-        rev_trend = self._score_revenue_trend(financials, data_gaps)
+        rev_qoq = self._score_revenue_qoq(financials, data_gaps)
+        earn_qoq = self._score_earnings_qoq(financials, data_gaps)
         analyst = self._score_analyst_growth(info, data_gaps, sector_benchmarks)
 
         composite = _weighted_average([
-            (rev_yoy, 0.30), (earn_yoy, 0.30), (rev_trend, 0.15), (analyst, 0.25),
+            (rev_yoy, 0.25), (earn_yoy, 0.25), (rev_qoq, 0.125),
+            (earn_qoq, 0.125), (analyst, 0.25),
         ])
         return GrowthMetrics(
             revenue_yoy=rev_yoy,
             earnings_yoy=earn_yoy,
-            revenue_trend=rev_trend,
+            revenue_qoq=rev_qoq,
+            earnings_qoq=earn_qoq,
             analyst_growth_est=analyst,
             composite_score=round(composite, 1),
             grade=score_to_grade(composite),
@@ -569,15 +642,16 @@ class FundamentalAnalyzer:
         return MetricScore(value=round(pct, 1), score=score, grade=score_to_grade(score),
                            description=f"{pct:+.1f}% YoY (sector avg: {benchmark}%)")
 
-    def _score_revenue_trend(self, financials: dict, data_gaps: list) -> MetricScore:
+    def _score_revenue_qoq(self, financials: dict, data_gaps: list) -> MetricScore:
+        """Score sequential quarter-over-quarter revenue growth with momentum adjustment."""
         quarterly = financials.get("quarterly_income")
         if not quarterly:
-            data_gaps.append("Revenue Trend")
+            data_gaps.append("Revenue QoQ")
             return MetricScore(description="Not available")
 
         periods = sorted(quarterly.keys(), reverse=True)
-        if len(periods) < 3:
-            data_gaps.append("Revenue Trend")
+        if len(periods) < 2:
+            data_gaps.append("Revenue QoQ")
             return MetricScore(description="Insufficient data")
 
         revenues = []
@@ -586,31 +660,105 @@ class FundamentalAnalyzer:
             if rev:
                 revenues.append(rev)
 
-        if len(revenues) < 3:
-            data_gaps.append("Revenue Trend")
+        if len(revenues) < 2:
+            data_gaps.append("Revenue QoQ")
             return MetricScore(description="Insufficient data")
 
-        growth_rates = []
-        for i in range(len(revenues) - 1):
-            if revenues[i + 1] != 0:
-                growth_rates.append((revenues[i] - revenues[i + 1]) / abs(revenues[i + 1]))
+        # Most recent QoQ growth
+        if revenues[1] == 0:
+            data_gaps.append("Revenue QoQ")
+            return MetricScore(description="Prior quarter revenue is zero")
 
-        if len(growth_rates) >= 2:
-            if growth_rates[0] > growth_rates[1]:
-                score = 80
-                desc = "Accelerating revenue growth"
-            elif growth_rates[0] > 0:
-                score = 60
-                desc = "Positive but decelerating growth"
+        qoq_pct = ((revenues[0] - revenues[1]) / abs(revenues[1])) * 100
+
+        breakpoints = [
+            (-15, 5), (-10, 15), (-5, 28), (-2, 40), (0, 50),
+            (2, 60), (5, 72), (8, 80), (12, 88), (20, 95),
+        ]
+        score = _interpolate(qoq_pct, breakpoints)
+
+        # Momentum adjustment: compare current QoQ to prior QoQ
+        momentum = ""
+        if len(revenues) >= 3 and revenues[2] != 0:
+            prior_qoq = ((revenues[1] - revenues[2]) / abs(revenues[2])) * 100
+            if qoq_pct > prior_qoq + 1:
+                score = min(score + 10, 99)
+                momentum = " (accelerating)"
+            elif qoq_pct < prior_qoq - 1:
+                score = max(score - 10, 1)
+                momentum = " (decelerating)"
             else:
-                score = 30
-                desc = "Revenue declining"
-        else:
-            data_gaps.append("Revenue Trend")
-            return MetricScore(description="Limited trend data")
+                momentum = " (stable)"
 
-        return MetricScore(value=round(growth_rates[0] * 100, 1) if growth_rates else None,
-                           score=score, grade=score_to_grade(score), description=desc)
+        desc = f"{qoq_pct:+.1f}% QoQ{momentum}"
+        return MetricScore(value=round(qoq_pct, 1), score=round(score, 1),
+                           grade=score_to_grade(score), description=desc)
+
+    def _score_earnings_qoq(self, financials: dict, data_gaps: list) -> MetricScore:
+        """Score sequential quarter-over-quarter earnings growth with turnaround/loss handling."""
+        quarterly = financials.get("quarterly_income")
+        if not quarterly:
+            data_gaps.append("Earnings QoQ")
+            return MetricScore(description="Not available")
+
+        periods = sorted(quarterly.keys(), reverse=True)
+        if len(periods) < 2:
+            data_gaps.append("Earnings QoQ")
+            return MetricScore(description="Insufficient data")
+
+        earnings = []
+        for p in periods[:4]:
+            ni = quarterly[p].get("Net Income") or quarterly[p].get("NetIncome")
+            if ni is not None:
+                earnings.append(ni)
+
+        if len(earnings) < 2:
+            data_gaps.append("Earnings QoQ")
+            return MetricScore(description="Insufficient data")
+
+        current, prior = earnings[0], earnings[1]
+
+        # Handle sign transitions explicitly
+        if prior < 0 and current > 0:
+            # Turnaround: loss to profit
+            score = 85
+            desc = f"Turnaround: loss to profit (${current/1e6:,.0f}M)"
+            return MetricScore(value=None, score=score, grade=score_to_grade(score), description=desc)
+        elif prior > 0 and current < 0:
+            # Into loss
+            score = 10
+            desc = f"Turned to loss (${current/1e6:,.0f}M)"
+            return MetricScore(value=None, score=score, grade=score_to_grade(score), description=desc)
+        elif prior == 0:
+            data_gaps.append("Earnings QoQ")
+            return MetricScore(description="Prior quarter earnings is zero")
+
+        qoq_pct = ((current - prior) / abs(prior)) * 100
+
+        breakpoints = [
+            (-25, 5), (-15, 18), (-8, 32), (-3, 42), (0, 50),
+            (3, 58), (8, 70), (15, 82), (25, 90), (40, 95),
+        ]
+        score = _interpolate(qoq_pct, breakpoints)
+
+        # Momentum adjustment
+        momentum = ""
+        if len(earnings) >= 3 and earnings[2] != 0:
+            # Only compute prior QoQ if same sign transition
+            if (earnings[2] > 0 and prior > 0) or (earnings[2] < 0 and prior < 0):
+                prior_qoq = ((prior - earnings[2]) / abs(earnings[2])) * 100
+                if qoq_pct > prior_qoq + 2:
+                    score = min(score + 10, 99)
+                    momentum = " (accelerating)"
+                elif qoq_pct < prior_qoq - 2:
+                    score = max(score - 10, 1)
+                    momentum = " (decelerating)"
+                else:
+                    momentum = " (stable)"
+
+        desc = f"{qoq_pct:+.1f}% QoQ{momentum}"
+        return MetricScore(value=round(qoq_pct, 1), score=round(score, 1),
+                           grade=score_to_grade(score), description=desc)
 
     def _score_analyst_growth(self, info: dict, data_gaps: list, sector_benchmarks: dict) -> MetricScore:
         growth = info.get("earningsGrowth")

@@ -11,6 +11,7 @@ from app.schemas.technical import TechnicalAnalysis
 from app.services.cache_manager import CacheManager
 from app.services.yahoo_direct import fetch_chart, fetch_quote_via_chart
 from app.services.yfinance_service import YFinanceService
+from app.services.edgar_service import EdgarService
 from app.services.finnhub_service import FinnhubService
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class DataAggregator:
         self.cache = CacheManager(db)
         self.yf = YFinanceService()
         self.finnhub = FinnhubService()
+        self.edgar = EdgarService()
 
     async def get_company_overview(self, ticker: str) -> CompanyOverview | None:
         # Check cache first
@@ -184,7 +186,7 @@ class DataAggregator:
             return FundamentalAnalysis(**cached)
 
         from app.analysis.fundamental_analyzer import FundamentalAnalyzer
-        analyzer = FundamentalAnalyzer(self.db, self.cache, self.yf, self.finnhub)
+        analyzer = FundamentalAnalyzer(self.db, self.cache, self.yf, self.finnhub, self.edgar)
         result = await analyzer.analyze(ticker)
         if result:
             await self.cache.set_analysis(ticker, "fundamental", result.model_dump())

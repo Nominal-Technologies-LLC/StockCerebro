@@ -70,6 +70,12 @@ class FinnhubService:
         result = await self._get("/stock/recommendation", {"symbol": ticker})
         return result if isinstance(result, list) else None
 
+    async def get_financials_reported(self, ticker: str) -> list[dict] | None:
+        result = await self._get("/stock/financials-reported", {"symbol": ticker, "freq": "quarterly"})
+        if result and isinstance(result.get("data"), list):
+            return result["data"]
+        return None
+
     async def get_news(self, ticker: str) -> list | None:
         from datetime import datetime, timedelta
         today = datetime.now().strftime("%Y-%m-%d")

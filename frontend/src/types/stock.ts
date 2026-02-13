@@ -59,7 +59,8 @@ export interface ValuationMetrics {
 export interface GrowthMetrics {
   revenue_yoy: MetricScore;
   earnings_yoy: MetricScore;
-  revenue_trend: MetricScore;
+  revenue_qoq: MetricScore;
+  earnings_qoq: MetricScore;
   analyst_growth_est: MetricScore;
   composite_score: number;
   grade: string;

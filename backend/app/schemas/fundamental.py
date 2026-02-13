@@ -21,7 +21,8 @@ class ValuationMetrics(BaseModel):
 class GrowthMetrics(BaseModel):
     revenue_yoy: MetricScore = MetricScore()
     earnings_yoy: MetricScore = MetricScore()
-    revenue_trend: MetricScore = MetricScore()
+    revenue_qoq: MetricScore = MetricScore()
+    earnings_qoq: MetricScore = MetricScore()
     analyst_growth_est: MetricScore = MetricScore()
     composite_score: float = 0
     grade: str = "N/A"

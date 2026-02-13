@@ -61,7 +61,8 @@ export default function FundamentalDashboard({ data }: Props) {
             </div>
             <MetricCard label="Revenue YoY" metric={data.growth.revenue_yoy} format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`} />
             <MetricCard label="Earnings YoY" metric={data.growth.earnings_yoy} format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`} />
-            <MetricCard label="Revenue Trend" metric={data.growth.revenue_trend} />
+            <MetricCard label="Revenue QoQ" metric={data.growth.revenue_qoq} format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`} />
+            <MetricCard label="Earnings QoQ" metric={data.growth.earnings_qoq} format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`} />
             <MetricCard label="Analyst Growth Est." metric={data.growth.analyst_growth_est} />
           </div>
         )}
