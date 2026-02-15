@@ -14,6 +14,20 @@ class Settings(BaseSettings):
     news_cache_ttl: int = 3600  # 1h
     analysis_cache_ttl: int = 1800  # 30 min
 
+    # Google OAuth2
+    google_client_id: str = ""
+    google_client_secret: str = ""
+
+    # JWT Settings
+    jwt_secret_key: str = "dev-secret-change-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 60 * 24  # 24 hours
+
+    # Cookie settings
+    cookie_domain: str | None = None  # None for localhost, set for production
+    cookie_secure: bool = False  # True in production (HTTPS only)
+    cookie_samesite: str = "lax"  # "strict" in production
+
     model_config = {"env_file": ".env"}
 
 

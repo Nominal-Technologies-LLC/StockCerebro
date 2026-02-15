@@ -18,7 +18,9 @@
       "Bash(python3:*)",
       "Bash(python -m json.tool:*)",
       "Bash(python:*)",
-      "WebFetch(domain:efts.sec.gov)"
+      "WebFetch(domain:efts.sec.gov)",
+      "Bash(ls:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

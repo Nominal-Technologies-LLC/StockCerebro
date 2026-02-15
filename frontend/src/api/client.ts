@@ -8,12 +8,14 @@ import type {
   NewsArticle,
   EarningsResponse,
 } from '../types/stock';
+import type { TokenResponse, User } from '../types/auth';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 const api = axios.create({
   baseURL: API_URL,
   timeout: 30000,
+  withCredentials: true,  // Send HTTP-only cookies with requests
 });
 
 export async function fetchCompanyOverview(ticker: string): Promise<CompanyOverview> {
@@ -64,5 +66,20 @@ export async function fetchEarnings(ticker: string): Promise<EarningsResponse> {
 
 export async function healthCheck(): Promise<{ status: string }> {
   const { data } = await api.get('/api/health');
+  return data;
+}
+
+// Auth API functions
+export async function googleLogin(credential: string): Promise<TokenResponse> {
+  const { data } = await api.post('/api/auth/google/login', { credential });
+  return data;
+}
+
+export async function logout(): Promise<void> {
+  await api.post('/api/auth/logout');
+}
+
+export async function getCurrentUser(): Promise<User> {
+  const { data } = await api.get('/api/auth/me');
   return data;
 }

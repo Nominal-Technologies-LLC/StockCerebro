@@ -12,9 +12,11 @@ import TechnicalDashboard from './components/technical/TechnicalDashboard';
 import ScorecardDashboard from './components/scorecard/ScorecardDashboard';
 import LoadingSpinner from './components/common/LoadingSpinner';
 import ErrorBoundary from './components/common/ErrorBoundary';
+import LandingPage from './components/auth/LandingPage';
+import { useAuth } from './context/AuthContext';
 import { useCompanyOverview, useFundamental, useEarnings, useScorecard, useNews } from './hooks/useStockData';
 
-export default function App() {
+function AppContent() {
   const [ticker, setTicker] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
 
@@ -118,4 +120,22 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+export default function App() {
+  const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <LoadingSpinner message="Loading..." />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LandingPage />;
+  }
+
+  return <AppContent />;
 }

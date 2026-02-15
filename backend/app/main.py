@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.endpoints import stock, fundamental, technical, scorecard, news, earnings
+from app.api.endpoints import auth, stock, fundamental, technical, scorecard, news, earnings
 
 logging.basicConfig(level=logging.INFO)
 
@@ -17,6 +17,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(stock.router)
 app.include_router(fundamental.router)
 app.include_router(technical.router)
