@@ -13,7 +13,7 @@ import math
 
 import numpy as np
 
-from app.analysis.grading import clamp, score_to_grade, score_to_signal
+from app.analysis.grading import clamp, interpolate, score_to_grade, score_to_signal
 from app.schemas.technical import (
     ChartPattern,
     MACDData,
@@ -103,19 +103,27 @@ class TechnicalAnalyzer:
 
         for period in sma_periods:
             if len(closes) >= period:
-                sma = np.mean(closes[-period:])
+                sma = float(np.mean(closes[-period:]))
+                pct_diff = ((price - sma) / sma) * 100 if sma != 0 else 0
                 signal = "bullish" if price > sma else "bearish"
-                score = 70 if price > sma else 30
+                score = interpolate(pct_diff, [
+                    (-15, 10), (-8, 25), (-3, 40), (0, 50),
+                    (3, 60), (8, 75), (15, 90),
+                ])
                 signals.append(MovingAverageSignal(
-                    period=period, type="SMA", value=round(float(sma), 2), signal=signal
+                    period=period, type="SMA", value=round(sma, 2), signal=signal
                 ))
                 scores.append(score)
 
         for period in ema_periods:
             if len(closes) >= period:
                 ema = self._calc_ema(closes, period)
+                pct_diff = ((price - ema) / ema) * 100 if ema != 0 else 0
                 signal = "bullish" if price > ema else "bearish"
-                score = 70 if price > ema else 30
+                score = interpolate(pct_diff, [
+                    (-15, 10), (-8, 25), (-3, 40), (0, 50),
+                    (3, 60), (8, 75), (15, 90),
+                ])
                 signals.append(MovingAverageSignal(
                     period=period, type="EMA", value=round(float(ema), 2), signal=signal
                 ))
@@ -226,20 +234,31 @@ class TechnicalAnalyzer:
             rs = avg_gain / avg_loss
             rsi = 100 - (100 / (1 + rs))
 
-        if rsi < 20:
-            score, signal = 90, "oversold"
-        elif rsi < 30:
-            score, signal = 80, "oversold"
+        # Determine trend from SMA50 for trend-aware RSI scoring
+        price = float(closes[-1])
+        in_uptrend = None
+        if len(closes) >= 50:
+            sma50 = float(np.mean(closes[-50:]))
+            in_uptrend = price > sma50
+
+        if rsi < 30:
+            score = 85 if in_uptrend else 80
+            signal = "oversold"
         elif rsi < 40:
-            score, signal = 65, "neutral"
+            score = 70 if in_uptrend else 60
+            signal = "neutral"
         elif rsi < 60:
-            score, signal = 50, "neutral"
+            score = 55 if in_uptrend else 45
+            signal = "neutral"
         elif rsi < 70:
-            score, signal = 35, "neutral"
+            score = 45 if in_uptrend else 30
+            signal = "neutral"
         elif rsi < 80:
-            score, signal = 20, "overbought"
+            score = 35 if in_uptrend else 15
+            signal = "overbought"
         else:
-            score, signal = 10, "overbought"
+            score = 20 if in_uptrend else 5
+            signal = "overbought"
 
         return RSIData(value=round(rsi, 1), signal=signal, score=round(score, 1))
 

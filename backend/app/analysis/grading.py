@@ -52,3 +52,29 @@ def score_to_signal(score: float) -> str:
 
 def clamp(value: float, low: float = 0, high: float = 100) -> float:
     return max(low, min(high, value))
+
+
+def interpolate(value: float, breakpoints: list[tuple[float, float]]) -> float:
+    """Smooth linear interpolation between breakpoints [(input_value, score), ...]."""
+    import math
+
+    if not isinstance(value, (int, float)) or math.isnan(value) or math.isinf(value):
+        return 50.0
+
+    for v, s in breakpoints:
+        if math.isnan(v) or math.isinf(v) or math.isnan(s) or math.isinf(s):
+            return 50.0
+
+    if value <= breakpoints[0][0]:
+        return float(breakpoints[0][1])
+    if value >= breakpoints[-1][0]:
+        return float(breakpoints[-1][1])
+    for i in range(len(breakpoints) - 1):
+        v1, s1 = breakpoints[i]
+        v2, s2 = breakpoints[i + 1]
+        if v1 <= value <= v2:
+            if v2 - v1 == 0:
+                return float(s1)
+            t = (value - v1) / (v2 - v1)
+            return round(s1 + t * (s2 - s1), 1)
+    return 50.0

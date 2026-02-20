@@ -29,8 +29,8 @@ export default function FundamentalDashboard({ data }: Props) {
         </div>
       </div>
 
-      {/* Sub-scores grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Sub-scores grid — 3 pillars */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Valuation */}
         {data.valuation && (
           <div className="space-y-2">
@@ -42,7 +42,7 @@ export default function FundamentalDashboard({ data }: Props) {
               </div>
             </div>
             <MetricCard label="Forward P/E" metric={data.valuation.forward_pe} format={formatRatio} />
-            <MetricCard label="P/E Ratio" metric={data.valuation.pe_ratio} format={formatRatio} />
+            <MetricCard label="EV/EBITDA" metric={data.valuation.ev_ebitda} format={formatRatio} />
             <MetricCard label="PEG Ratio" metric={data.valuation.peg_ratio} format={formatRatio} />
             <MetricCard label="P/B Ratio" metric={data.valuation.pb_ratio} format={formatRatio} />
             <MetricCard label="P/S Ratio" metric={data.valuation.ps_ratio} format={formatRatio} />
@@ -63,52 +63,37 @@ export default function FundamentalDashboard({ data }: Props) {
             <MetricCard label="Earnings YoY" metric={data.growth.earnings_yoy} format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`} />
             <MetricCard label="Revenue QoQ" metric={data.growth.revenue_qoq} format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`} />
             <MetricCard label="Earnings QoQ" metric={data.growth.earnings_qoq} format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`} />
-            <MetricCard label="Analyst Growth Est." metric={data.growth.analyst_growth_est} />
+            <MetricCard label="Forward Growth Est." metric={data.growth.forward_growth_est} />
           </div>
         )}
 
-        {/* Financial Health */}
-        {data.health && (
+        {/* Quality */}
+        {data.quality && (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium text-gray-300">Financial Health</h3>
+              <h3 className="text-sm font-medium text-gray-300">Quality</h3>
               <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-400">{data.health.composite_score.toFixed(0)}/100</span>
-                <LetterGrade grade={data.health.grade} size="sm" />
+                <span className="text-sm text-gray-400">{data.quality.composite_score.toFixed(0)}/100</span>
+                <LetterGrade grade={data.quality.grade} size="sm" />
               </div>
             </div>
-            <MetricCard label="Debt/Equity" metric={data.health.debt_to_equity} format={formatRatio} />
-            {data.health.roe?.value != null ? (
+            {data.quality.roe?.value != null ? (
               <>
-                <MetricCard label="Return on Equity" metric={data.health.roe} format={(v) => `${v.toFixed(1)}%`} />
-                <MetricCard label="Return on Assets" metric={data.health.roa} format={(v) => `${v.toFixed(2)}%`} />
-                <MetricCard label="Payout Ratio" metric={data.health.payout_ratio} format={(v) => `${v.toFixed(0)}%`} />
+                <MetricCard label="Return on Equity" metric={data.quality.roe} format={(v) => `${v.toFixed(1)}%`} />
+                <MetricCard label="Return on Assets" metric={data.quality.roa} format={(v) => `${v.toFixed(2)}%`} />
+                <MetricCard label="Debt/Equity" metric={data.quality.debt_to_equity} format={formatRatio} />
+                <MetricCard label="Payout Ratio" metric={data.quality.payout_ratio} format={(v) => `${v.toFixed(0)}%`} />
               </>
             ) : (
               <>
-                <MetricCard label="Current Ratio" metric={data.health.current_ratio} format={formatRatio} />
-                <MetricCard label="Interest Coverage" metric={data.health.interest_coverage} format={(v) => `${v.toFixed(1)}x`} />
-                <MetricCard label="FCF Yield" metric={data.health.fcf_yield} format={(v) => `${v.toFixed(1)}%`} />
-                <MetricCard label="OCF Trend" metric={data.health.ocf_trend} />
+                <MetricCard label="ROIC" metric={data.quality.roic} format={(v) => `${v.toFixed(1)}%`} />
+                <MetricCard label="FCF Yield" metric={data.quality.fcf_yield} format={(v) => `${v.toFixed(1)}%`} />
+                <MetricCard label="Operating Margin" metric={data.quality.operating_margin} format={(v) => `${v.toFixed(1)}%`} />
+                <MetricCard label="Debt/Equity" metric={data.quality.debt_to_equity} format={formatRatio} />
+                <MetricCard label="Margin Trend" metric={data.quality.margin_trend} />
+                <MetricCard label="OCF Trend" metric={data.quality.ocf_trend} />
               </>
             )}
-          </div>
-        )}
-
-        {/* Profitability */}
-        {data.profitability && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium text-gray-300">Profitability</h3>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-400">{data.profitability.composite_score.toFixed(0)}/100</span>
-                <LetterGrade grade={data.profitability.grade} size="sm" />
-              </div>
-            </div>
-            <MetricCard label="Gross Margin" metric={data.profitability.gross_margin} format={(v) => `${v.toFixed(1)}%`} />
-            <MetricCard label="Operating Margin" metric={data.profitability.operating_margin} format={(v) => `${v.toFixed(1)}%`} />
-            <MetricCard label="Net Margin" metric={data.profitability.net_margin} format={(v) => `${v.toFixed(1)}%`} />
-            <MetricCard label="Margin Trend" metric={data.profitability.margin_trend} />
           </div>
         )}
       </div>

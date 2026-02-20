@@ -9,8 +9,8 @@ class MetricScore(BaseModel):
 
 
 class ValuationMetrics(BaseModel):
-    pe_ratio: MetricScore = MetricScore()
     forward_pe: MetricScore = MetricScore()
+    ev_ebitda: MetricScore = MetricScore()
     peg_ratio: MetricScore = MetricScore()
     pb_ratio: MetricScore = MetricScore()
     ps_ratio: MetricScore = MetricScore()
@@ -23,17 +23,18 @@ class GrowthMetrics(BaseModel):
     earnings_yoy: MetricScore = MetricScore()
     revenue_qoq: MetricScore = MetricScore()
     earnings_qoq: MetricScore = MetricScore()
-    analyst_growth_est: MetricScore = MetricScore()
+    forward_growth_est: MetricScore = MetricScore()
     composite_score: float = 0
     grade: str = "N/A"
 
 
-class HealthMetrics(BaseModel):
+class QualityMetrics(BaseModel):
     # Standard metrics (non-financial companies)
-    debt_to_equity: MetricScore = MetricScore()
-    current_ratio: MetricScore = MetricScore()
-    interest_coverage: MetricScore = MetricScore()
+    roic: MetricScore = MetricScore()
     fcf_yield: MetricScore = MetricScore()
+    operating_margin: MetricScore = MetricScore()
+    debt_to_equity: MetricScore = MetricScore()
+    margin_trend: MetricScore = MetricScore()
     ocf_trend: MetricScore = MetricScore()
     # Bank/financial metrics (populated for Financial Services sector)
     roe: MetricScore = MetricScore()
@@ -43,21 +44,11 @@ class HealthMetrics(BaseModel):
     grade: str = "N/A"
 
 
-class ProfitabilityMetrics(BaseModel):
-    gross_margin: MetricScore = MetricScore()
-    operating_margin: MetricScore = MetricScore()
-    net_margin: MetricScore = MetricScore()
-    margin_trend: MetricScore = MetricScore()
-    composite_score: float = 0
-    grade: str = "N/A"
-
-
 class FundamentalAnalysis(BaseModel):
     ticker: str
     valuation: ValuationMetrics = ValuationMetrics()
     growth: GrowthMetrics = GrowthMetrics()
-    health: HealthMetrics = HealthMetrics()
-    profitability: ProfitabilityMetrics = ProfitabilityMetrics()
+    quality: QualityMetrics = QualityMetrics()
     overall_score: float = 0
     grade: str = "N/A"
     confidence: float = 0  # 0-1, how much data was available

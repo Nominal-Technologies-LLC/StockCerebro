@@ -47,8 +47,8 @@ export interface MetricScore {
 }
 
 export interface ValuationMetrics {
-  pe_ratio: MetricScore;
   forward_pe: MetricScore;
+  ev_ebitda: MetricScore;
   peg_ratio: MetricScore;
   pb_ratio: MetricScore;
   ps_ratio: MetricScore;
@@ -61,17 +61,18 @@ export interface GrowthMetrics {
   earnings_yoy: MetricScore;
   revenue_qoq: MetricScore;
   earnings_qoq: MetricScore;
-  analyst_growth_est: MetricScore;
+  forward_growth_est: MetricScore;
   composite_score: number;
   grade: string;
 }
 
-export interface HealthMetrics {
+export interface QualityMetrics {
   // Standard metrics (non-financial companies)
-  debt_to_equity: MetricScore;
-  current_ratio: MetricScore;
-  interest_coverage: MetricScore;
+  roic: MetricScore;
   fcf_yield: MetricScore;
+  operating_margin: MetricScore;
+  debt_to_equity: MetricScore;
+  margin_trend: MetricScore;
   ocf_trend: MetricScore;
   // Bank/financial metrics
   roe: MetricScore;
@@ -81,21 +82,11 @@ export interface HealthMetrics {
   grade: string;
 }
 
-export interface ProfitabilityMetrics {
-  gross_margin: MetricScore;
-  operating_margin: MetricScore;
-  net_margin: MetricScore;
-  margin_trend: MetricScore;
-  composite_score: number;
-  grade: string;
-}
-
 export interface FundamentalAnalysis {
   ticker: string;
   valuation: ValuationMetrics;
   growth: GrowthMetrics;
-  health: HealthMetrics;
-  profitability: ProfitabilityMetrics;
+  quality: QualityMetrics;
   overall_score: number;
   grade: string;
   confidence: number;

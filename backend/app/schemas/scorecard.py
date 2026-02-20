@@ -15,12 +15,12 @@ class SwingTradeAssessment(BaseModel):
 
 class ScoreBreakdown(BaseModel):
     fundamental_score: float = 0
-    fundamental_weight: float = 0.50
+    fundamental_weight: float = 0.60
     technical_daily_score: float = 0
     technical_weekly_score: float = 0
     technical_hourly_score: float = 0
     technical_consensus: float = 0
-    technical_weight: float = 0.50
+    technical_weight: float = 0.40
 
 
 class NewsArticle(BaseModel):

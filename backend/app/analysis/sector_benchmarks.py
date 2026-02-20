@@ -96,16 +96,17 @@ def score_relative(value: float, benchmark: float, lower_is_better: bool = True)
         ratio = benchmark / value if value > 0 else 3.0
 
     # Interpolation breakpoints: (ratio, score)
+    # ratio=1.0 → score=50 (at benchmark = average)
     breakpoints = [
         (0.0, 98),
-        (0.4, 95),
-        (0.6, 85),
-        (0.8, 72),
-        (1.0, 60),
-        (1.2, 50),
-        (1.5, 38),
-        (2.0, 25),
-        (3.0, 10),
+        (0.4, 92),
+        (0.6, 80),
+        (0.8, 65),
+        (1.0, 50),
+        (1.2, 38),
+        (1.5, 25),
+        (2.0, 15),
+        (3.0, 5),
     ]
 
     # Clamp at boundaries

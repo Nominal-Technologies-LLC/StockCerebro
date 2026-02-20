@@ -3,7 +3,7 @@ Scorecard engine - combines fundamental + technical scores, generates signals,
 swing trade assessment.
 
 technical_consensus = daily*0.50 + weekly*0.35 + hourly*0.15
-overall_score = fundamental*0.50 + technical_consensus*0.50
+overall_score = fundamental*0.60 + technical_consensus*0.40
 
 Override rules prevent recommending buys when fundamentals and technicals strongly disagree.
 """
@@ -44,9 +44,9 @@ class ScorecardEngine:
 
         if has_fundamentals:
             fund_score = fundamental.overall_score
-            overall = fund_score * 0.50 + tech_consensus * 0.50
-            fund_weight = 0.50
-            tech_weight = 0.50
+            overall = fund_score * 0.60 + tech_consensus * 0.40
+            fund_weight = 0.60
+            tech_weight = 0.40
         else:
             # ETF or no fundamental data: 100% technical
             fund_score = 0
