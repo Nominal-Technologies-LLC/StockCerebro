@@ -76,3 +76,4 @@ Required in `.env` (see `.env.example`):
 - `EDGAR_USER_AGENT` — your email (SEC fair access policy)
 - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — Google OAuth2 credentials
 - `JWT_SECRET_KEY` — session signing key
+- `OPENAI_API_KEY` — OpenAI API key for macro risk analysis (GPT-5.1)

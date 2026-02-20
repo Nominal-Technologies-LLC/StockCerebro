@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://stockcerebro:stockcerebro_dev_password@db:5432/stockcerebro"
     finnhub_api_key: str = ""
     edgar_user_agent: str = "stockcerebro@example.com"
-    anthropic_api_key: str = ""
+    openai_api_key: str = ""
 
     # Cache TTLs in seconds
     price_cache_ttl_market: int = 900  # 15 min during market hours

@@ -1,6 +1,5 @@
 import json
 import logging
-import re
 from datetime import datetime, timezone
 
 from app.config import get_settings
@@ -8,11 +7,11 @@ from app.schemas.macro_risk import MacroFactor, MacroRiskResponse
 
 logger = logging.getLogger(__name__)
 
-MODEL = "claude-haiku-4-5-20251001"
+MODEL = "gpt-5.1"
 
 SYSTEM_PROMPT = """You are a macro-economic analyst. Given a company's profile, recent news, and key financial metrics, identify the most important macro tailwinds and headwinds affecting this stock.
 
-Respond ONLY with valid JSON (no markdown fencing) in this exact format:
+Respond ONLY with valid JSON in this exact format:
 {
   "tailwinds": [
     {
@@ -41,17 +40,17 @@ Rules:
 """
 
 
-class ClaudeService:
+class OpenAIService:
     def __init__(self):
         settings = get_settings()
-        self.api_key = settings.anthropic_api_key
+        self.api_key = settings.openai_api_key
         self._client = None
 
     @property
     def client(self):
         if self._client is None:
-            import anthropic
-            self._client = anthropic.AsyncAnthropic(api_key=self.api_key)
+            import openai
+            self._client = openai.AsyncOpenAI(api_key=self.api_key)
         return self._client
 
     @property
@@ -92,18 +91,17 @@ class ClaudeService:
         user_prompt = "\n\n".join(parts)
 
         try:
-            response = await self.client.messages.create(
+            response = await self.client.chat.completions.create(
                 model=MODEL,
                 max_tokens=1500,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_prompt}],
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
             )
 
-            raw = response.content[0].text
-            # Strip markdown fencing if present
-            raw = re.sub(r"^```(?:json)?\s*\n?", "", raw.strip())
-            raw = re.sub(r"\n?```\s*$", "", raw.strip())
-
+            raw = response.choices[0].message.content
             data = json.loads(raw)
 
             tailwinds = [MacroFactor(**f) for f in data.get("tailwinds", [])]
@@ -122,5 +120,5 @@ class ClaudeService:
             )
 
         except Exception as e:
-            logger.error(f"Claude API error for {ticker}: {e}")
+            logger.error(f"OpenAI API error for {ticker}: {e}")
             return None
