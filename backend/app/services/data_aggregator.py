@@ -14,7 +14,7 @@ from app.services.cache_manager import CacheManager
 from app.services.yahoo_direct import fetch_chart, fetch_quote_via_chart
 from app.services.yfinance_service import YFinanceService
 from app.services.edgar_service import EdgarService
-from app.services.claude_service import ClaudeService
+from app.services.openai_service import OpenAIService
 from app.services.finnhub_service import FinnhubService
 
 logger = logging.getLogger(__name__)
@@ -112,7 +112,7 @@ class DataAggregator:
         self.yf = YFinanceService()
         self.finnhub = FinnhubService()
         self.edgar = EdgarService()
-        self.claude = ClaudeService()
+        self.openai = OpenAIService()
 
     async def get_company_overview(self, ticker: str) -> CompanyOverview | None:
         # Check cache first
@@ -520,11 +520,11 @@ class DataAggregator:
         if cached:
             return MacroRiskResponse(**cached)
 
-        # If Claude not configured, return error response
-        if not self.claude.is_configured:
+        # If OpenAI not configured, return error response
+        if not self.openai.is_configured:
             error_resp = MacroRiskResponse(
                 ticker=ticker,
-                error="Macro analysis unavailable: ANTHROPIC_API_KEY not configured",
+                error="Macro analysis unavailable: OPENAI_API_KEY not configured",
             )
             # Cache briefly (5 min) so we don't spam logs
             await self.cache.set_analysis(ticker, "macro_risk", error_resp.model_dump())
@@ -563,7 +563,7 @@ class DataAggregator:
         if isinstance(news, list):
             news_headlines = [n.get("headline", "") for n in news[:10] if n.get("headline")]
 
-        result = await self.claude.get_macro_risk(
+        result = await self.openai.get_macro_risk(
             ticker=ticker,
             company_name=company_name,
             sector=sector,
@@ -577,7 +577,7 @@ class DataAggregator:
                 ticker=ticker,
                 company_name=company_name,
                 sector=sector,
-                error="Macro analysis failed: Claude API call unsuccessful",
+                error="Macro analysis failed: OpenAI API call unsuccessful",
             )
 
         await self.cache.set_analysis(ticker, "macro_risk", result.model_dump())
