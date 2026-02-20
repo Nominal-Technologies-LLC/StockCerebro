@@ -60,7 +60,7 @@ export interface GrowthMetrics {
   revenue_yoy: MetricScore;
   earnings_yoy: MetricScore;
   revenue_qoq: MetricScore;
-  earnings_qoq: MetricScore;
+  fcf_growth_qoq: MetricScore;
   forward_growth_est: MetricScore;
   composite_score: number;
   grade: string;
@@ -72,7 +72,7 @@ export interface QualityMetrics {
   fcf_yield: MetricScore;
   operating_margin: MetricScore;
   debt_to_equity: MetricScore;
-  margin_trend: MetricScore;
+  cash_conversion: MetricScore;
   ocf_trend: MetricScore;
   // Bank/financial metrics
   roe: MetricScore;
@@ -203,6 +203,25 @@ export interface EarningsResponse {
   ticker: string;
   quarters: QuarterlyEarnings[];
   data_source: string;
+}
+
+export interface MacroFactor {
+  title: string;
+  explanation: string;
+  impact: 'high' | 'medium' | 'low';
+  category: string;
+}
+
+export interface MacroRiskResponse {
+  ticker: string;
+  company_name: string | null;
+  sector: string | null;
+  tailwinds: MacroFactor[];
+  headwinds: MacroFactor[];
+  summary: string;
+  analyzed_at: string;
+  model_used: string;
+  error: string | null;
 }
 
 export interface Scorecard {

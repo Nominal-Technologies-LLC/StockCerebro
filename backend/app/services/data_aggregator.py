@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.earnings import EarningsResponse, QuarterlyEarnings
 from app.schemas.fundamental import FundamentalAnalysis
+from app.schemas.macro_risk import MacroRiskResponse
 from app.schemas.scorecard import NewsArticle, Scorecard
 from app.schemas.stock import ChartData, CompanyOverview, OHLCVBar
 from app.schemas.technical import TechnicalAnalysis
@@ -13,6 +14,7 @@ from app.services.cache_manager import CacheManager
 from app.services.yahoo_direct import fetch_chart, fetch_quote_via_chart
 from app.services.yfinance_service import YFinanceService
 from app.services.edgar_service import EdgarService
+from app.services.claude_service import ClaudeService
 from app.services.finnhub_service import FinnhubService
 
 logger = logging.getLogger(__name__)
@@ -110,6 +112,7 @@ class DataAggregator:
         self.yf = YFinanceService()
         self.finnhub = FinnhubService()
         self.edgar = EdgarService()
+        self.claude = ClaudeService()
 
     async def get_company_overview(self, ticker: str) -> CompanyOverview | None:
         # Check cache first
@@ -504,3 +507,78 @@ class DataAggregator:
         except Exception as e:
             logger.warning(f"Failed to get filing URLs for {ticker}: {e}")
             return None
+
+    # ── Macro Risk ────────────────────────────────────────────────────
+
+    async def get_macro_risk(self, ticker: str) -> MacroRiskResponse | None:
+        from app.config import get_settings
+
+        settings = get_settings()
+
+        # Check cache (6h TTL)
+        cached = await self.cache.get_analysis(ticker, "macro_risk", ttl=settings.macro_risk_cache_ttl)
+        if cached:
+            return MacroRiskResponse(**cached)
+
+        # If Claude not configured, return error response
+        if not self.claude.is_configured:
+            error_resp = MacroRiskResponse(
+                ticker=ticker,
+                error="Macro analysis unavailable: ANTHROPIC_API_KEY not configured",
+            )
+            # Cache briefly (5 min) so we don't spam logs
+            await self.cache.set_analysis(ticker, "macro_risk", error_resp.model_dump())
+            return error_resp
+
+        # Gather company context concurrently
+        profile_task = self.finnhub.get_company_profile(ticker)
+        metrics_task = self.finnhub.get_basic_financials(ticker)
+        news_task = self.finnhub.get_news(ticker)
+
+        profile, metrics, news = await asyncio.gather(
+            profile_task, metrics_task, news_task,
+            return_exceptions=True,
+        )
+
+        # Extract context
+        company_name = None
+        sector = None
+        market_cap = None
+        if isinstance(profile, dict) and profile:
+            company_name = profile.get("name")
+            sector = profile.get("finnhubIndustry")
+            mc = profile.get("marketCapitalization")
+            if mc:
+                market_cap = mc * 1_000_000
+
+        key_metrics = {}
+        if isinstance(metrics, dict) and metrics:
+            m = metrics.get("metric", {})
+            for key in ("peBasicExclExtraTTM", "revenueGrowthTTMYoy", "epsGrowth5Y",
+                         "dividendYieldIndicatedAnnual", "beta", "netMarginTTM"):
+                if m.get(key) is not None:
+                    key_metrics[key] = m[key]
+
+        news_headlines = []
+        if isinstance(news, list):
+            news_headlines = [n.get("headline", "") for n in news[:10] if n.get("headline")]
+
+        result = await self.claude.get_macro_risk(
+            ticker=ticker,
+            company_name=company_name,
+            sector=sector,
+            market_cap=market_cap,
+            news_headlines=news_headlines,
+            metrics=key_metrics,
+        )
+
+        if result is None:
+            result = MacroRiskResponse(
+                ticker=ticker,
+                company_name=company_name,
+                sector=sector,
+                error="Macro analysis failed: Claude API call unsuccessful",
+            )
+
+        await self.cache.set_analysis(ticker, "macro_risk", result.model_dump())
+        return result

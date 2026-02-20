@@ -62,7 +62,7 @@ export default function FundamentalDashboard({ data }: Props) {
             <MetricCard label="Revenue YoY" metric={data.growth.revenue_yoy} format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`} />
             <MetricCard label="Earnings YoY" metric={data.growth.earnings_yoy} format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`} />
             <MetricCard label="Revenue QoQ" metric={data.growth.revenue_qoq} format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`} />
-            <MetricCard label="Earnings QoQ" metric={data.growth.earnings_qoq} format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`} />
+            <MetricCard label="FCF Growth" metric={data.growth.fcf_growth_qoq} format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`} />
             <MetricCard label="Forward Growth Est." metric={data.growth.forward_growth_est} />
           </div>
         )}
@@ -90,7 +90,7 @@ export default function FundamentalDashboard({ data }: Props) {
                 <MetricCard label="FCF Yield" metric={data.quality.fcf_yield} format={(v) => `${v.toFixed(1)}%`} />
                 <MetricCard label="Operating Margin" metric={data.quality.operating_margin} format={(v) => `${v.toFixed(1)}%`} />
                 <MetricCard label="Debt/Equity" metric={data.quality.debt_to_equity} format={formatRatio} />
-                <MetricCard label="Margin Trend" metric={data.quality.margin_trend} />
+                <MetricCard label="Cash Conversion" metric={data.quality.cash_conversion} format={(v) => `${v.toFixed(2)}x`} />
                 <MetricCard label="OCF Trend" metric={data.quality.ocf_trend} />
               </>
             )}

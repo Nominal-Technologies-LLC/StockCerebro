@@ -7,6 +7,7 @@ import type {
   Scorecard,
   NewsArticle,
   EarningsResponse,
+  MacroRiskResponse,
 } from '../types/stock';
 import type { TokenResponse, User } from '../types/auth';
 
@@ -61,6 +62,11 @@ export async function fetchNews(ticker: string): Promise<NewsArticle[]> {
 
 export async function fetchEarnings(ticker: string): Promise<EarningsResponse> {
   const { data } = await api.get(`/api/stock/${ticker}/earnings`);
+  return data;
+}
+
+export async function fetchMacroRisk(ticker: string): Promise<MacroRiskResponse> {
+  const { data } = await api.get(`/api/stock/${ticker}/macro`);
   return data;
 }
 

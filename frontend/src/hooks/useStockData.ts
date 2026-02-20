@@ -6,6 +6,7 @@ import {
   fetchScorecard,
   fetchNews,
   fetchEarnings,
+  fetchMacroRisk,
 } from '../api/client';
 import { getRefreshInterval } from '../utils/marketHours';
 
@@ -60,5 +61,14 @@ export function useEarnings(ticker: string) {
     queryFn: () => fetchEarnings(ticker),
     enabled: !!ticker,
     staleTime: 10 * 60_000,
+  });
+}
+
+export function useMacroRisk(ticker: string, enabled = true) {
+  return useQuery({
+    queryKey: ['macro', ticker],
+    queryFn: () => fetchMacroRisk(ticker),
+    enabled: !!ticker && enabled,
+    staleTime: 30 * 60_000,
   });
 }

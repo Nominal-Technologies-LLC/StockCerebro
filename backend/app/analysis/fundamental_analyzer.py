@@ -5,11 +5,11 @@ Computes three pillar scores with weights: Valuation 35%, Growth 30%, Quality 35
 - Valuation (Forward PE 25%, EV/EBITDA 25%, PEG 20%, P/S 15%, P/B 15%)
   — scored RELATIVE to sector/peer benchmarks
   — PE is growth-adjusted: high-growth companies are allowed higher multiples
-- Growth (Revenue YoY 30%, Earnings YoY 30%, Revenue QoQ 10%, Earnings QoQ 10%, Forward Growth Est 20%)
-- Quality (ROIC 20%, FCF Yield 20%, Operating Margin 15%, D/E 15%, Margin Trend 15%, OCF Trend 15%)
+- Growth (Revenue YoY 30%, Earnings YoY 30%, Revenue QoQ 10%, FCF Growth QoQ 10%, Forward Growth Est 20%)
+- Quality (ROIC 20%, FCF Yield 20%, Operating Margin 15%, D/E 15%, Cash Conversion 15%, OCF Trend 15%)
   — Banks use: ROE 35%, ROA 25%, D/E 20%, Payout 20%
 
-Quarterly data pipeline (Revenue QoQ, Earnings QoQ, Margin Trend):
+Quarterly data pipeline (Revenue QoQ, FCF Growth QoQ):
   1. Finnhub /stock/financials-reported (primary)
   2. SEC EDGAR company_facts (fallback)
   3. yfinance quarterly data (last resort)
@@ -169,6 +169,9 @@ class FundamentalAnalyzer:
                 pr = metric.get("payoutRatioTTM") or metric.get("payoutRatioAnnual")
                 if pr is not None:
                     info["payoutRatio"] = pr
+            # Net income for cash conversion ratio
+            if not info.get("netIncome") and metric.get("netIncomeAnnual"):
+                info["netIncome"] = metric["netIncomeAnnual"]
 
         # Enrich with Finnhub company profile for sector/industry
         if not info.get("sector"):
@@ -519,18 +522,18 @@ class FundamentalAnalyzer:
         rev_yoy = self._score_revenue_yoy(info, financials, data_gaps, sector_benchmarks)
         earn_yoy = self._score_earnings_yoy(info, financials, data_gaps, sector_benchmarks)
         rev_qoq = self._score_revenue_qoq(financials, data_gaps)
-        earn_qoq = self._score_earnings_qoq(financials, data_gaps)
+        fcf_qoq = self._score_fcf_growth_qoq(info, financials, data_gaps)
         fwd = self._score_forward_growth_est(info, data_gaps, sector_benchmarks)
 
         composite = _weighted_average([
             (rev_yoy, 0.30), (earn_yoy, 0.30), (rev_qoq, 0.10),
-            (earn_qoq, 0.10), (fwd, 0.20),
+            (fcf_qoq, 0.10), (fwd, 0.20),
         ])
         return GrowthMetrics(
             revenue_yoy=rev_yoy,
             earnings_yoy=earn_yoy,
             revenue_qoq=rev_qoq,
-            earnings_qoq=earn_qoq,
+            fcf_growth_qoq=fcf_qoq,
             forward_growth_est=fwd,
             composite_score=round(composite, 1),
             grade=score_to_grade(composite),
@@ -635,64 +638,61 @@ class FundamentalAnalyzer:
         return MetricScore(value=round(qoq_pct, 1), score=round(score, 1),
                            grade=score_to_grade(score), description=desc)
 
-    def _score_earnings_qoq(self, financials: dict, data_gaps: list) -> MetricScore:
-        quarterly = financials.get("quarterly_income")
-        if not quarterly:
-            data_gaps.append("Earnings QoQ")
+    def _score_fcf_growth_qoq(self, info: dict, financials: dict, data_gaps: list) -> MetricScore:
+        """Score FCF growth using cash flow statements (annual periods as fallback)."""
+        cf = financials.get("cash_flow", {})
+        if not cf:
+            data_gaps.append("FCF Growth")
             return MetricScore(description="Not available")
 
-        periods = sorted(quarterly.keys(), reverse=True)
-        if len(periods) < 2:
-            data_gaps.append("Earnings QoQ")
-            return MetricScore(description="Insufficient data")
+        periods = sorted(cf.keys(), reverse=True)
+        fcfs = []
+        for p in periods[:3]:
+            fcf = cf[p].get("Free Cash Flow") or cf[p].get("FreeCashFlow")
+            if fcf is not None:
+                fcfs.append(fcf)
 
-        earnings = []
-        for p in periods[:4]:
-            ni = quarterly[p].get("Net Income") or quarterly[p].get("NetIncome")
-            if ni is not None:
-                earnings.append(ni)
+        if len(fcfs) < 2:
+            data_gaps.append("FCF Growth")
+            return MetricScore(description="Insufficient FCF data")
 
-        if len(earnings) < 2:
-            data_gaps.append("Earnings QoQ")
-            return MetricScore(description="Insufficient data")
+        current, prior = fcfs[0], fcfs[1]
 
-        current, prior = earnings[0], earnings[1]
-
-        if prior < 0 and current > 0:
-            score = 85
-            desc = f"Turnaround: loss to profit (${current/1e6:,.0f}M)"
+        if prior == 0:
+            if current > 0:
+                score = 75
+                desc = "FCF turned positive"
+            elif current < 0:
+                score = 20
+                desc = "FCF remains weak"
+            else:
+                score = 50
+                desc = "FCF flat at zero"
             return MetricScore(value=None, score=score, grade=score_to_grade(score), description=desc)
-        elif prior > 0 and current < 0:
-            score = 10
-            desc = f"Turned to loss (${current/1e6:,.0f}M)"
-            return MetricScore(value=None, score=score, grade=score_to_grade(score), description=desc)
-        elif prior == 0:
-            data_gaps.append("Earnings QoQ")
-            return MetricScore(description="Prior quarter earnings is zero")
 
-        qoq_pct = ((current - prior) / abs(prior)) * 100
+        growth_pct = ((current - prior) / abs(prior)) * 100
 
         breakpoints = [
-            (-25, 5), (-15, 18), (-8, 32), (-3, 42), (0, 50),
-            (3, 58), (8, 70), (15, 82), (25, 90), (40, 95),
+            (-15, 5), (-10, 15), (-5, 28), (-2, 40), (0, 50),
+            (2, 60), (5, 72), (8, 80), (12, 88), (20, 95),
         ]
-        score = interpolate(qoq_pct, breakpoints)
+        score = interpolate(growth_pct, breakpoints)
 
+        # Momentum adjustment
         momentum = ""
-        if len(earnings) >= 3 and earnings[2] != 0:
-            if (earnings[2] > 0 and prior > 0) or (earnings[2] < 0 and prior < 0):
-                prior_qoq = ((prior - earnings[2]) / abs(earnings[2])) * 100
-                if qoq_pct > prior_qoq + 2:
-                    score = min(score + 10, 99)
-                    momentum = " (accelerating)"
-                elif qoq_pct < prior_qoq - 2:
-                    score = max(score - 10, 1)
-                    momentum = " (decelerating)"
-                else:
-                    momentum = " (stable)"
+        if len(fcfs) >= 3 and fcfs[2] != 0:
+            prior_growth = ((prior - fcfs[2]) / abs(fcfs[2])) * 100
+            if growth_pct > prior_growth + 2:
+                score = min(score + 10, 99)
+                momentum = " (accelerating)"
+            elif growth_pct < prior_growth - 2:
+                score = max(score - 10, 1)
+                momentum = " (decelerating)"
+            else:
+                momentum = " (stable)"
 
-        desc = f"{qoq_pct:+.1f}% QoQ{momentum}"
-        return MetricScore(value=round(qoq_pct, 1), score=round(score, 1),
+        desc = f"FCF {growth_pct:+.1f}% growth{momentum}"
+        return MetricScore(value=round(growth_pct, 1), score=round(score, 1),
                            grade=score_to_grade(score), description=desc)
 
     def _score_forward_growth_est(self, info: dict, data_gaps: list, sector_benchmarks: dict) -> MetricScore:
@@ -722,7 +722,7 @@ class FundamentalAnalyzer:
         return MetricScore(description="Not available")
 
     # ── Quality Scoring ──────────────────────────────────────────────
-    # Standard weights: ROIC 20%, FCF 20%, OpMargin 15%, D/E 15%, Margin Trend 15%, OCF 15%
+    # Standard weights: ROIC 20%, FCF 20%, OpMargin 15%, D/E 15%, Cash Conversion 15%, OCF 15%
     # Bank weights: ROE 35%, ROA 25%, D/E (lenient) 20%, Payout 20%
 
     @staticmethod
@@ -742,18 +742,18 @@ class FundamentalAnalyzer:
         fcf = self._score_fcf_yield(info, financials, data_gaps)
         om = self._score_operating_margin(info, data_gaps, benchmarks)
         de = self._score_debt_to_equity(info, data_gaps)
-        mt = self._score_margin_trend(info, financials, data_gaps)
+        cc = self._score_cash_conversion(info, financials, data_gaps)
         ocf = self._score_ocf_trend(financials, data_gaps)
 
         composite = _weighted_average([
-            (roic, 0.20), (fcf, 0.20), (om, 0.15), (de, 0.15), (mt, 0.15), (ocf, 0.15),
+            (roic, 0.20), (fcf, 0.20), (om, 0.15), (de, 0.15), (cc, 0.15), (ocf, 0.15),
         ])
         return QualityMetrics(
             roic=roic,
             fcf_yield=fcf,
             operating_margin=om,
             debt_to_equity=de,
-            margin_trend=mt,
+            cash_conversion=cc,
             ocf_trend=ocf,
             composite_score=round(composite, 1),
             grade=score_to_grade(composite),
@@ -920,41 +920,77 @@ class FundamentalAnalyzer:
             description=f"Operating margin {pct:.1f}% (sector avg: {benchmark:.0f}%)"
         )
 
-    def _score_margin_trend(self, info: dict, financials: dict, data_gaps: list) -> MetricScore:
-        quarterly = financials.get("quarterly_income", {})
-        if not quarterly:
-            data_gaps.append("Margin Trend")
-            return MetricScore(description="No quarterly data")
+    def _score_cash_conversion(self, info: dict, financials: dict, data_gaps: list) -> MetricScore:
+        """
+        Cash Conversion Ratio = FCF / Net Income.
+        Cross-checks earnings quality: a healthy company converts most net income to FCF.
+        """
+        fcf = info.get("freeCashflow")
+        if fcf is None:
+            cf = financials.get("cash_flow", {})
+            if cf:
+                latest = sorted(cf.keys(), reverse=True)
+                if latest:
+                    fcf = cf[latest[0]].get("Free Cash Flow") or cf[latest[0]].get("FreeCashFlow")
 
-        periods = sorted(quarterly.keys(), reverse=True)
-        if len(periods) < 5:
-            data_gaps.append("Margin Trend")
-            return MetricScore(description="Insufficient quarterly data")
+        # Get net income from multiple sources
+        net_income = info.get("netIncome")
+        if net_income is None:
+            inc = financials.get("income_statement", {})
+            if inc:
+                latest = sorted(inc.keys(), reverse=True)
+                if latest:
+                    net_income = inc[latest[0]].get("Net Income") or inc[latest[0]].get("NetIncome")
+        if net_income is None:
+            pm = info.get("profitMargins")
+            rev = info.get("totalRevenue") or info.get("revenue")
+            if pm is not None and rev:
+                net_income = pm * rev
 
-        def get_op_margin(period_data):
-            revenue = period_data.get("Total Revenue") or period_data.get("TotalRevenue")
-            op_income = period_data.get("Operating Income") or period_data.get("OperatingIncome") or period_data.get("EBIT")
-            if revenue and op_income and revenue != 0:
-                return op_income / revenue
-            return None
+        if fcf is None or net_income is None:
+            data_gaps.append("Cash Conversion")
+            return MetricScore(description="Not available")
 
-        current_margin = get_op_margin(quarterly[periods[0]])
-        yago_margin = get_op_margin(quarterly[periods[4]]) if len(periods) > 4 else None
+        # Edge cases for sign mismatches
+        if net_income < 0 and fcf > 0:
+            return MetricScore(value=None, score=80, grade=score_to_grade(80),
+                               description="Positive FCF despite accounting loss — good cash generation")
+        if net_income < 0 and fcf <= 0:
+            return MetricScore(value=None, score=25, grade=score_to_grade(25),
+                               description="Both NI and FCF negative — weak")
+        if net_income == 0:
+            score = 60 if fcf > 0 else 30
+            return MetricScore(value=None, score=score, grade=score_to_grade(score),
+                               description=f"Zero net income, FCF {'positive' if fcf > 0 else 'negative'}")
 
-        if current_margin is not None and yago_margin is not None:
-            improvement = (current_margin - yago_margin) * 100
-            score = interpolate(improvement, [
-                (-8, 10), (-5, 25), (-3, 35), (-1, 45), (0, 50),
-                (1, 58), (3, 70), (5, 82), (8, 92),
-            ])
-            if improvement > 0:
-                desc = f"Margins expanding (+{improvement:.1f}pp)"
-            else:
-                desc = f"Margins contracting ({improvement:.1f}pp)"
-            return MetricScore(value=round(improvement, 1), score=round(score, 1), grade=score_to_grade(score), description=desc)
+        ratio = fcf / net_income
 
-        data_gaps.append("Margin Trend")
-        return MetricScore(description="Cannot determine margin trend")
+        breakpoints = [
+            (-0.5, 5),   # FCF deeply negative vs positive NI
+            (0.0, 15),   # Zero FCF
+            (0.3, 30),   # FCF well below NI
+            (0.6, 42),   # FCF lagging NI
+            (0.8, 55),   # Slightly below — acceptable
+            (1.0, 70),   # FCF matches NI — healthy
+            (1.2, 80),   # FCF exceeds NI — strong
+            (1.5, 88),   # Much more FCF than NI
+            (2.0, 92),   # Very high conversion
+        ]
+        score = interpolate(ratio, breakpoints)
+
+        if ratio >= 1.2:
+            desc = f"CCR {ratio:.2f}x — Excellent cash conversion"
+        elif ratio >= 0.8:
+            desc = f"CCR {ratio:.2f}x — Healthy cash conversion"
+        elif ratio >= 0.5:
+            desc = f"CCR {ratio:.2f}x — FCF lagging earnings"
+        elif ratio >= 0:
+            desc = f"CCR {ratio:.2f}x — Weak cash conversion"
+        else:
+            desc = f"CCR {ratio:.2f}x — Negative FCF despite positive earnings"
+
+        return MetricScore(value=round(ratio, 2), score=round(score, 1),
+                           grade=score_to_grade(score), description=desc)
 
     def _score_ocf_trend(self, financials: dict, data_gaps: list) -> MetricScore:
         cf = financials.get("cash_flow", {})

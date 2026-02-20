@@ -10,11 +10,12 @@ import FundamentalDashboard from './components/fundamental/FundamentalDashboard'
 import EarningsDashboard from './components/earnings/EarningsDashboard';
 import TechnicalDashboard from './components/technical/TechnicalDashboard';
 import ScorecardDashboard from './components/scorecard/ScorecardDashboard';
+import MacroDashboard from './components/macro/MacroDashboard';
 import LoadingSpinner from './components/common/LoadingSpinner';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import LandingPage from './components/auth/LandingPage';
 import { useAuth } from './context/AuthContext';
-import { useCompanyOverview, useFundamental, useEarnings, useScorecard, useNews } from './hooks/useStockData';
+import { useCompanyOverview, useFundamental, useEarnings, useScorecard, useNews, useMacroRisk } from './hooks/useStockData';
 
 function AppContent() {
   const [ticker, setTicker] = useState('');
@@ -26,6 +27,7 @@ function AppContent() {
   const { data: earnings, isLoading: earningsLoading } = useEarnings(isEtf ? '' : ticker);
   const { data: scorecard, isLoading: scorecardLoading } = useScorecard(ticker);
   const { data: news } = useNews(ticker);
+  const { data: macroRisk, isLoading: macroLoading } = useMacroRisk(ticker, activeTab === 'macro');
 
   const handleSearch = (t: string) => {
     setTicker(t);
@@ -100,6 +102,13 @@ function AppContent() {
               <ErrorBoundary>
                 {earningsLoading && <LoadingSpinner message="Loading earnings..." />}
                 {earnings && <EarningsDashboard data={earnings} />}
+              </ErrorBoundary>
+            )}
+
+            {activeTab === 'macro' && (
+              <ErrorBoundary>
+                {macroLoading && <LoadingSpinner message="Analyzing macro factors..." />}
+                {macroRisk && <MacroDashboard data={macroRisk} />}
               </ErrorBoundary>
             )}
 

@@ -9,6 +9,7 @@ const allTabs = [
   { id: 'fundamental', label: 'Fundamental' },
   { id: 'technical', label: 'Technical' },
   { id: 'earnings', label: 'Earnings' },
+  { id: 'macro', label: 'Macro' },
   { id: 'scorecard', label: 'Scorecard' },
 ];
 
