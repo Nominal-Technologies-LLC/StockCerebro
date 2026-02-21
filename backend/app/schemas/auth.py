@@ -1,10 +1,17 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 
 class GoogleLoginRequest(BaseModel):
     credential: str  # JWT token from Google Sign-In
+
+
+class SubscriptionInfo(BaseModel):
+    status: str  # 'admin', 'override', 'paid', 'trialing', 'expired'
+    has_access: bool
+    has_macro_access: bool
+    trial_ends_at: datetime | None
 
 
 class UserResponse(BaseModel):
@@ -13,6 +20,7 @@ class UserResponse(BaseModel):
     name: str
     picture: str | None
     is_admin: bool = False
+    subscription: SubscriptionInfo | None = None
 
 
 class TokenResponse(BaseModel):
@@ -28,3 +36,6 @@ class AdminUserResponse(BaseModel):
     picture: str | None
     created_at: datetime
     last_login: datetime
+    subscription_status: str | None = None
+    subscription_override: bool = False
+    trial_ends_at: datetime | None = None
