@@ -3,6 +3,16 @@ export interface User {
   email: string;
   name: string;
   picture: string | null;
+  is_admin: boolean;
+}
+
+export interface AdminUser {
+  id: number;
+  email: string;
+  name: string;
+  picture: string | null;
+  created_at: string;
+  last_login: string;
 }
 
 export interface TokenResponse {

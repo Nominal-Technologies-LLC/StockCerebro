@@ -53,7 +53,8 @@ async def google_login(
                 id=user.id,
                 email=user.email,
                 name=user.name,
-                picture=user.picture
+                picture=user.picture,
+                is_admin=settings.is_admin(user.email)
             )
         )
     except ValueError as e:
@@ -70,9 +71,11 @@ async def logout(response: Response):
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
     """Get current authenticated user."""
+    settings = get_settings()
     return UserResponse(
         id=current_user.id,
         email=current_user.email,
         name=current_user.name,
-        picture=current_user.picture
+        picture=current_user.picture,
+        is_admin=settings.is_admin(current_user.email)
     )

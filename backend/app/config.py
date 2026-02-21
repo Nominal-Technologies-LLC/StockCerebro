@@ -8,6 +8,15 @@ class Settings(BaseSettings):
     edgar_user_agent: str = "stockcerebro@example.com"
     openai_api_key: str = ""
 
+    # Admin emails (comma-separated)
+    admin_emails: str = ""
+
+    def is_admin(self, email: str) -> bool:
+        if not self.admin_emails:
+            return False
+        admin_list = [e.strip().lower() for e in self.admin_emails.split(",") if e.strip()]
+        return email.lower() in admin_list
+
     # Cache TTLs in seconds
     price_cache_ttl_market: int = 900  # 15 min during market hours
     price_cache_ttl_closed: int = 86400  # 24h when market closed
