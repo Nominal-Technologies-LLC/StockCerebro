@@ -9,7 +9,7 @@ import type {
   EarningsResponse,
   MacroRiskResponse,
 } from '../types/stock';
-import type { TokenResponse, User } from '../types/auth';
+import type { AdminUser, TokenResponse, User } from '../types/auth';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -87,5 +87,11 @@ export async function logout(): Promise<void> {
 
 export async function getCurrentUser(): Promise<User> {
   const { data } = await api.get('/api/auth/me');
+  return data;
+}
+
+// Admin API functions
+export async function fetchAdminUsers(): Promise<AdminUser[]> {
+  const { data } = await api.get('/api/admin/users');
   return data;
 }
