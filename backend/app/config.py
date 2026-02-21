@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     # Admin emails (comma-separated)
     admin_emails: str = ""
 
+    # Stripe
+    stripe_secret_key: str = ""
+    stripe_publishable_key: str = ""
+    stripe_price_id: str = ""
+    stripe_webhook_secret: str = ""
+
     def is_admin(self, email: str) -> bool:
         if not self.admin_emails:
             return False

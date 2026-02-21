@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Header from './components/layout/Header';
 import SearchBar from './components/layout/SearchBar';
 import TabNavigation from './components/layout/TabNavigation';
@@ -15,10 +15,14 @@ import AdminDashboard from './components/admin/AdminDashboard';
 import LoadingSpinner from './components/common/LoadingSpinner';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import LandingPage from './components/auth/LandingPage';
+import PricingPage from './components/subscription/PricingPage';
+import PaywallGate from './components/subscription/PaywallGate';
+import MacroUpgradePrompt from './components/subscription/MacroUpgradePrompt';
 import { useAuth } from './context/AuthContext';
 import { useCompanyOverview, useFundamental, useEarnings, useScorecard, useNews, useMacroRisk } from './hooks/useStockData';
 
 function AppContent() {
+  const { hasMacroAccess } = useAuth();
   const [ticker, setTicker] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
   const [showAdmin, setShowAdmin] = useState(false);
@@ -29,7 +33,10 @@ function AppContent() {
   const { data: earnings, isLoading: earningsLoading } = useEarnings(isEtf ? '' : ticker);
   const { data: scorecard, isLoading: scorecardLoading } = useScorecard(ticker);
   const { data: news } = useNews(ticker);
-  const { data: macroRisk, isLoading: macroLoading } = useMacroRisk(ticker, activeTab === 'macro');
+  const { data: macroRisk, isLoading: macroLoading } = useMacroRisk(
+    ticker,
+    activeTab === 'macro' && hasMacroAccess
+  );
 
   const handleSearch = (t: string) => {
     setTicker(t);
@@ -85,7 +92,12 @@ function AppContent() {
             {company && !companyError && (
               <>
                 <CompanyHeader company={company} />
-                <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} isEtf={isEtf} />
+                <TabNavigation
+                  activeTab={activeTab}
+                  onTabChange={setActiveTab}
+                  isEtf={isEtf}
+                  hasMacroAccess={hasMacroAccess}
+                />
 
                 {activeTab === 'overview' && (
                   <ErrorBoundary>
@@ -116,8 +128,14 @@ function AppContent() {
 
                 {activeTab === 'macro' && (
                   <ErrorBoundary>
-                    {macroLoading && <LoadingSpinner message="Analyzing macro factors..." />}
-                    {macroRisk && <MacroDashboard data={macroRisk} />}
+                    {hasMacroAccess ? (
+                      <>
+                        {macroLoading && <LoadingSpinner message="Analyzing macro factors..." />}
+                        {macroRisk && <MacroDashboard data={macroRisk} />}
+                      </>
+                    ) : (
+                      <MacroUpgradePrompt />
+                    )}
                   </ErrorBoundary>
                 )}
 
@@ -143,7 +161,22 @@ function AppContent() {
 }
 
 export default function App() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, hasAccess, refreshSubscription } = useAuth();
+  const [showPricing, setShowPricing] = useState(false);
+
+  // Check for subscription success/canceled query params
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const subscriptionResult = params.get('subscription');
+    if (subscriptionResult === 'success') {
+      // Refresh subscription status after successful checkout
+      refreshSubscription();
+      // Clean up URL
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (subscriptionResult === 'canceled') {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, [refreshSubscription]);
 
   if (isLoading) {
     return (
@@ -153,9 +186,21 @@ export default function App() {
     );
   }
 
-  if (!isAuthenticated) {
-    return <LandingPage />;
+  // Show pricing page (accessible from landing page or paywall)
+  if (showPricing) {
+    return <PricingPage onBack={() => setShowPricing(false)} />;
   }
 
+  // Not authenticated -> landing page
+  if (!isAuthenticated) {
+    return <LandingPage onViewPricing={() => setShowPricing(true)} />;
+  }
+
+  // Authenticated but no access (trial expired, no subscription) -> paywall
+  if (!hasAccess) {
+    return <PaywallGate onViewPricing={() => setShowPricing(true)} />;
+  }
+
+  // Authenticated with access -> main app
   return <AppContent />;
 }

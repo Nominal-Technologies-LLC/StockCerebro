@@ -5,10 +5,39 @@ from app.api.dependencies import get_current_user
 from app.config import get_settings
 from app.database import get_db
 from app.models.user import User
-from app.schemas.auth import GoogleLoginRequest, TokenResponse, UserResponse
+from app.schemas.auth import GoogleLoginRequest, SubscriptionInfo, TokenResponse, UserResponse
 from app.services.auth_service import AuthService
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+def _build_subscription_info(user: User, is_admin: bool) -> SubscriptionInfo:
+    if is_admin:
+        access = "admin"
+    else:
+        access = user.effective_access
+
+    has_access = access in ("admin", "override", "paid", "trialing")
+    has_macro_access = access in ("admin", "override", "paid")
+
+    return SubscriptionInfo(
+        status=access,
+        has_access=has_access,
+        has_macro_access=has_macro_access,
+        trial_ends_at=user.trial_ends_at,
+    )
+
+
+def _build_user_response(user: User, settings) -> UserResponse:
+    is_admin = settings.is_admin(user.email)
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        picture=user.picture,
+        is_admin=is_admin,
+        subscription=_build_subscription_info(user, is_admin),
+    )
 
 
 @router.post("/google/login", response_model=TokenResponse)
@@ -25,7 +54,7 @@ async def google_login(
         # Verify Google token
         idinfo = await auth_service.verify_google_token(request.credential)
 
-        # Get or create user
+        # Get or create user (trial is initialized for new users in auth_service)
         user = await auth_service.get_or_create_user(
             google_id=idinfo['sub'],
             email=idinfo['email'],
@@ -49,13 +78,7 @@ async def google_login(
 
         return TokenResponse(
             access_token=access_token,
-            user=UserResponse(
-                id=user.id,
-                email=user.email,
-                name=user.name,
-                picture=user.picture,
-                is_admin=settings.is_admin(user.email)
-            )
+            user=_build_user_response(user, settings),
         )
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -72,10 +95,4 @@ async def logout(response: Response):
 async def get_me(current_user: User = Depends(get_current_user)):
     """Get current authenticated user."""
     settings = get_settings()
-    return UserResponse(
-        id=current_user.id,
-        email=current_user.email,
-        name=current_user.name,
-        picture=current_user.picture,
-        is_admin=settings.is_admin(current_user.email)
-    )
+    return _build_user_response(current_user, settings)

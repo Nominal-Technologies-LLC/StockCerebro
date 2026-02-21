@@ -1,7 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
-import { fetchAdminUsers } from '../../api/client';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { fetchAdminUsers, overrideUserSubscription, removeUserOverride } from '../../api/client';
 import type { AdminUser } from '../../types/auth';
 import LoadingSpinner from '../common/LoadingSpinner';
+import { useState } from 'react';
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -27,12 +28,75 @@ function timeAgo(iso: string): string {
   return `${months}mo ago`;
 }
 
+function StatusBadge({ status }: { status: string | null }) {
+  const colors: Record<string, string> = {
+    admin: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+    paid: 'bg-green-500/20 text-green-400 border-green-500/30',
+    active: 'bg-green-500/20 text-green-400 border-green-500/30',
+    override: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+    trialing: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+    expired: 'bg-red-500/20 text-red-400 border-red-500/30',
+    canceled: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+    past_due: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+  };
+
+  const label = status || 'unknown';
+  const colorClass = colors[label] || 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+
+  return (
+    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium border ${colorClass}`}>
+      {label}
+    </span>
+  );
+}
+
+function OverrideButton({ user, onToggle }: { user: AdminUser; onToggle: (userId: number, grant: boolean) => void }) {
+  // Don't show override button for admins
+  if (user.subscription_status === 'admin') {
+    return null;
+  }
+
+  return (
+    <button
+      onClick={() => onToggle(user.id, !user.subscription_override)}
+      className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+        user.subscription_override
+          ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/30'
+          : 'text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 border border-gray-700 hover:border-blue-500/30'
+      }`}
+      title={user.subscription_override ? 'Remove free access override' : 'Grant free access override'}
+    >
+      {user.subscription_override ? 'Remove Override' : 'Grant Override'}
+    </button>
+  );
+}
+
 export default function AdminDashboard() {
+  const queryClient = useQueryClient();
+  const [pendingAction, setPendingAction] = useState<number | null>(null);
+
   const { data: users, isLoading, error } = useQuery<AdminUser[]>({
     queryKey: ['admin', 'users'],
     queryFn: fetchAdminUsers,
     staleTime: 30_000,
   });
+
+  const handleOverrideToggle = async (userId: number, grant: boolean) => {
+    setPendingAction(userId);
+    try {
+      if (grant) {
+        await overrideUserSubscription(userId);
+      } else {
+        await removeUserOverride(userId);
+      }
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+    } catch (err) {
+      console.error('Failed to toggle override:', err);
+      alert('Failed to update subscription override.');
+    } finally {
+      setPendingAction(null);
+    }
+  };
 
   if (isLoading) {
     return <LoadingSpinner message="Loading users..." />;
@@ -77,16 +141,28 @@ export default function AdminDashboard() {
                   Email
                 </th>
                 <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Subscription
+                </th>
+                <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Trial Ends
+                </th>
+                <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Joined
                 </th>
                 <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Last Login
                 </th>
+                <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800/50">
               {users.map((user) => (
-                <tr key={user.id} className="hover:bg-gray-800/30 transition-colors">
+                <tr
+                  key={user.id}
+                  className={`hover:bg-gray-800/30 transition-colors ${pendingAction === user.id ? 'opacity-50' : ''}`}
+                >
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       {user.picture ? (
@@ -107,6 +183,12 @@ export default function AdminDashboard() {
                   </td>
                   <td className="px-4 py-3 text-gray-400">{user.email}</td>
                   <td className="px-4 py-3">
+                    <StatusBadge status={user.subscription_status} />
+                  </td>
+                  <td className="px-4 py-3 text-gray-400 text-xs">
+                    {user.trial_ends_at ? formatDate(user.trial_ends_at) : '—'}
+                  </td>
+                  <td className="px-4 py-3">
                     <span className="text-gray-400" title={formatDate(user.created_at)}>
                       {formatDate(user.created_at)}
                     </span>
@@ -115,6 +197,12 @@ export default function AdminDashboard() {
                     <span className="text-gray-400" title={formatDate(user.last_login)}>
                       {timeAgo(user.last_login)}
                     </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <OverrideButton
+                      user={user}
+                      onToggle={handleOverrideToggle}
+                    />
                   </td>
                 </tr>
               ))}
