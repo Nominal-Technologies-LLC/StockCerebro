@@ -64,7 +64,7 @@ class StripeService:
             event = stripe.Webhook.construct_event(
                 payload, sig_header, settings.stripe_webhook_secret
             )
-        except (ValueError, stripe.error.SignatureVerificationError) as e:
+        except (ValueError, stripe.SignatureVerificationError) as e:
             logger.error(f"Stripe webhook verification failed: {e}")
             raise
 
