@@ -21,7 +21,10 @@
       "WebFetch(domain:efts.sec.gov)",
       "Bash(ls:*)",
       "Bash(npx tsc:*)",
-      "Bash(xxd:*)"
+      "Bash(xxd:*)",
+      "Skill(keybindings-help)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)"
     ]
   }
 }
