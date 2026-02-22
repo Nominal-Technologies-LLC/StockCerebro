@@ -6,7 +6,7 @@ Computes three pillar scores with weights: Valuation 35%, Growth 30%, Quality 35
   — scored RELATIVE to sector/peer benchmarks
   — PE is growth-adjusted: high-growth companies are allowed higher multiples
 - Growth (Revenue YoY 30%, Earnings YoY 30%, Revenue QoQ 10%, FCF Growth QoQ 10%, Forward Growth Est 20%)
-- Quality (ROIC 20%, FCF Yield 20%, Operating Margin 15%, D/E 15%, Cash Conversion 15%, OCF Trend 15%)
+- Quality (ROIC 18%, FCF Yield 18%, Operating Margin 13%, D/E 13%, Cash Conversion 12%, OCF Trend 12%, Current Ratio 7%, Interest Coverage 7%)
   — Banks use: ROE 35%, ROA 25%, D/E 20%, Payout 20%
 
 Quarterly data pipeline (Revenue QoQ, FCF Growth QoQ):
@@ -90,7 +90,7 @@ class FundamentalAnalyzer:
         else:
             overall = 0
 
-        total_metrics = 12
+        total_metrics = 14
         available_count = total_metrics - len(data_gaps)
         confidence = available_count / total_metrics
 
@@ -172,6 +172,14 @@ class FundamentalAnalyzer:
             # Net income for cash conversion ratio
             if not info.get("netIncome") and metric.get("netIncomeAnnual"):
                 info["netIncome"] = metric["netIncomeAnnual"]
+            # Interest Coverage
+            if not info.get("interestCoverage") and metric.get("netInterestCoverageTTM"):
+                info["interestCoverage"] = metric["netInterestCoverageTTM"]
+            # Current Ratio
+            if not info.get("currentRatio"):
+                cr = metric.get("currentRatioQuarterly") or metric.get("currentRatioAnnual")
+                if cr is not None:
+                    info["currentRatio"] = cr
 
         # Enrich with Finnhub company profile for sector/industry
         if not info.get("sector"):
@@ -208,6 +216,20 @@ class FundamentalAnalyzer:
             data["quarterly_income"] = quarterly
         elif not data.get("quarterly_income"):
             data["quarterly_income"] = quarterly or {}
+
+        # Build cash_flow dict from XBRL data when yfinance cash flow is missing
+        if not data.get("cash_flow") and quarterly:
+            cf_data = {}
+            for period, values in quarterly.items():
+                ocf = values.get("Operating Cash Flow")
+                if ocf is not None:
+                    entry = {"Operating Cash Flow": ocf}
+                    capex = values.get("Capital Expenditure")
+                    if capex is not None:
+                        entry["Free Cash Flow"] = ocf - abs(capex)
+                    cf_data[period] = entry
+            if cf_data:
+                data["cash_flow"] = cf_data
 
         return data
 
@@ -722,7 +744,7 @@ class FundamentalAnalyzer:
         return MetricScore(description="Not available")
 
     # ── Quality Scoring ──────────────────────────────────────────────
-    # Standard weights: ROIC 20%, FCF 20%, OpMargin 15%, D/E 15%, Cash Conversion 15%, OCF 15%
+    # Standard weights: ROIC 18%, FCF 18%, OpMargin 13%, D/E 13%, Cash Conv 12%, OCF 12%, CR 7%, IC 7%
     # Bank weights: ROE 35%, ROA 25%, D/E (lenient) 20%, Payout 20%
 
     @staticmethod
@@ -744,9 +766,12 @@ class FundamentalAnalyzer:
         de = self._score_debt_to_equity(info, data_gaps)
         cc = self._score_cash_conversion(info, financials, data_gaps)
         ocf = self._score_ocf_trend(financials, data_gaps)
+        cr = self._score_current_ratio(info, data_gaps)
+        ic = self._score_interest_coverage(info, data_gaps)
 
         composite = _weighted_average([
-            (roic, 0.20), (fcf, 0.20), (om, 0.15), (de, 0.15), (cc, 0.15), (ocf, 0.15),
+            (roic, 0.18), (fcf, 0.18), (om, 0.13), (de, 0.13),
+            (cc, 0.12), (ocf, 0.12), (cr, 0.07), (ic, 0.07),
         ])
         return QualityMetrics(
             roic=roic,
@@ -755,6 +780,8 @@ class FundamentalAnalyzer:
             debt_to_equity=de,
             cash_conversion=cc,
             ocf_trend=ocf,
+            current_ratio=cr,
+            interest_coverage=ic,
             composite_score=round(composite, 1),
             grade=score_to_grade(composite),
         )
@@ -1034,6 +1061,57 @@ class FundamentalAnalyzer:
         return MetricScore(value=round(ocfs[0], 0), score=round(score, 1),
                            grade=score_to_grade(score), description=desc)
 
+    def _score_current_ratio(self, info: dict, data_gaps: list) -> MetricScore:
+        cr = info.get("currentRatio")
+        if cr is None:
+            data_gaps.append("Current Ratio")
+            return MetricScore(description="Not available")
+
+        # Peaks around 2.0; penalizes both too-low (liquidity risk) and too-high (capital inefficiency)
+        score = interpolate(cr, [
+            (0.3, 5), (0.5, 15), (0.8, 35), (1.0, 50), (1.2, 62),
+            (1.5, 75), (2.0, 82), (2.5, 75), (3.0, 65), (5.0, 45),
+        ])
+
+        if cr >= 2.5:
+            desc = f"CR {cr:.2f} — High, may indicate idle capital"
+        elif cr >= 1.5:
+            desc = f"CR {cr:.2f} — Healthy liquidity"
+        elif cr >= 1.0:
+            desc = f"CR {cr:.2f} — Adequate liquidity"
+        elif cr >= 0.8:
+            desc = f"CR {cr:.2f} — Tight liquidity"
+        else:
+            desc = f"CR {cr:.2f} — Liquidity risk"
+
+        return MetricScore(value=round(cr, 2), score=round(score, 1),
+                           grade=score_to_grade(score), description=desc)
+
+    def _score_interest_coverage(self, info: dict, data_gaps: list) -> MetricScore:
+        ic = info.get("interestCoverage")
+        if ic is None:
+            data_gaps.append("Interest Coverage")
+            return MetricScore(description="Not available")
+
+        score = interpolate(ic, [
+            (0, 5), (1.0, 15), (1.5, 25), (2.5, 40), (4.0, 55),
+            (6.0, 65), (8.0, 72), (10.0, 78), (15.0, 85), (25.0, 88),
+        ])
+
+        if ic >= 15:
+            desc = f"IC {ic:.1f}x — Excellent debt service capacity"
+        elif ic >= 6:
+            desc = f"IC {ic:.1f}x — Comfortable coverage"
+        elif ic >= 2.5:
+            desc = f"IC {ic:.1f}x — Adequate coverage"
+        elif ic >= 1.5:
+            desc = f"IC {ic:.1f}x — Tight coverage"
+        else:
+            desc = f"IC {ic:.1f}x — Dangerous, may struggle to cover interest"
+
+        return MetricScore(value=round(ic, 2), score=round(score, 1),
+                           grade=score_to_grade(score), description=desc)
+
     # ── Bank-Specific Quality Methods ─────────────────────────────────
 
     def _score_bank_debt_to_equity(self, info: dict, data_gaps: list) -> MetricScore:
@@ -1132,28 +1210,10 @@ class FundamentalAnalyzer:
     # ── Helpers ───────────────────────────────────────────────────────
 
     def _growth_rate_score(self, pct: float) -> float:
-        if pct > 50:
-            return 95
-        elif pct > 25:
-            return 85
-        elif pct > 15:
-            return 70
-        elif pct > 5:
-            return 55
-        elif pct > 0:
-            return 45
-        elif pct > -5:
-            return 35
-        elif pct > -10:
-            return 25
-        elif pct > -20:
-            return 15
-        elif pct > -30:
-            return 10
-        elif pct > -50:
-            return 5
-        else:
-            return 1
+        return interpolate(pct, [
+            (-50, 1), (-30, 8), (-20, 15), (-10, 25), (-5, 35),
+            (0, 45), (5, 55), (15, 70), (25, 85), (50, 95),
+        ])
 
     def _calc_yoy_growth(self, financials: dict, *field_names) -> float | None:
         income = financials.get("income_statement", {})

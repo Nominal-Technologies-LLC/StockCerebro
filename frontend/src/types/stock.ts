@@ -74,6 +74,8 @@ export interface QualityMetrics {
   debt_to_equity: MetricScore;
   cash_conversion: MetricScore;
   ocf_trend: MetricScore;
+  current_ratio: MetricScore;
+  interest_coverage: MetricScore;
   // Bank/financial metrics
   roe: MetricScore;
   roa: MetricScore;

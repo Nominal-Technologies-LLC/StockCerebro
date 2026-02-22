@@ -92,6 +92,8 @@ export default function FundamentalDashboard({ data }: Props) {
                 <MetricCard label="Debt/Equity" metric={data.quality.debt_to_equity} format={formatRatio} />
                 <MetricCard label="Cash Conversion" metric={data.quality.cash_conversion} format={(v) => `${v.toFixed(2)}x`} />
                 <MetricCard label="OCF Trend" metric={data.quality.ocf_trend} />
+                <MetricCard label="Current Ratio" metric={data.quality.current_ratio} format={formatRatio} />
+                <MetricCard label="Interest Coverage" metric={data.quality.interest_coverage} format={(v) => `${v.toFixed(1)}x`} />
               </>
             )}
           </div>

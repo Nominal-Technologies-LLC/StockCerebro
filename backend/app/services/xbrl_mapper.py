@@ -35,8 +35,18 @@ NET_INCOME_CONCEPTS = [
 OPERATING_INCOME_CONCEPTS = [
     "us-gaap_OperatingIncomeLoss",
 ]
+OCF_CONCEPTS = [
+    "us-gaap_NetCashProvidedByUsedInOperatingActivities",
+    "us-gaap_NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
+    "us-gaap_CashFlowsFromUsedInOperatingActivities",
+]
+CAPEX_CONCEPTS = [
+    "us-gaap_PaymentsToAcquirePropertyPlantAndEquipment",
+    "us-gaap_PaymentsToAcquireProductiveAssets",
+    "us-gaap_CapitalExpendituresIncurredButNotYetPaid",
+]
 
-_METRIC_KEYS = ["Total Revenue", "Net Income", "Operating Income"]
+_METRIC_KEYS = ["Total Revenue", "Net Income", "Operating Income", "Operating Cash Flow", "Capital Expenditure"]
 
 
 def _first_match(report_data: dict, concepts: list[str]) -> float | None:
@@ -101,12 +111,19 @@ def parse_finnhub_quarterly(reports: list[dict]) -> dict:
             continue
 
         period_data = {}
+        ocf = _first_match(flat, OCF_CONCEPTS)
+        capex = _first_match(flat, CAPEX_CONCEPTS)
+
         if revenue is not None:
             period_data["Total Revenue"] = revenue
         if net_income is not None:
             period_data["Net Income"] = net_income
         if operating_income is not None:
             period_data["Operating Income"] = operating_income
+        if ocf is not None:
+            period_data["Operating Cash Flow"] = ocf
+        if capex is not None:
+            period_data["Capital Expenditure"] = capex
 
         days = (end_dt - start_dt).days if start_dt else 0
 
@@ -269,6 +286,8 @@ def parse_edgar_quarterly(facts: dict) -> dict:
     _extract_concept(us_gaap, REVENUE_CONCEPTS, "Total Revenue")
     _extract_concept(us_gaap, NET_INCOME_CONCEPTS, "Net Income")
     _extract_concept(us_gaap, OPERATING_INCOME_CONCEPTS, "Operating Income")
+    _extract_concept(us_gaap, OCF_CONCEPTS, "Operating Cash Flow")
+    _extract_concept(us_gaap, CAPEX_CONCEPTS, "Capital Expenditure")
 
     # Only keep periods that have at least revenue or net income
     result = {
