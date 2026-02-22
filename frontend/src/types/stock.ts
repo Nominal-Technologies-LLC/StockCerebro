@@ -231,6 +231,15 @@ export interface MacroRiskResponse {
   error: string | null;
 }
 
+export interface RecentlyViewedItem {
+  ticker: string;
+  company_name: string | null;
+  grade: string | null;
+  signal: string | null;
+  score: number | null;
+  viewed_at: string;
+}
+
 export interface Scorecard {
   ticker: string;
   overall_score: number;

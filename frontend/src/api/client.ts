@@ -8,6 +8,7 @@ import type {
   NewsArticle,
   EarningsResponse,
   MacroRiskResponse,
+  RecentlyViewedItem,
 } from '../types/stock';
 import type { AdminUser, SubscriptionInfo, TokenResponse, User } from '../types/auth';
 
@@ -116,6 +117,29 @@ export async function createCheckoutSession(successUrl: string, cancelUrl: strin
 export async function createPortalSession(returnUrl: string): Promise<{ portal_url: string }> {
   const { data } = await api.post('/api/subscription/create-portal-session', {
     return_url: returnUrl,
+  });
+  return data;
+}
+
+// Recently viewed API functions
+export async function fetchRecentlyViewed(): Promise<RecentlyViewedItem[]> {
+  const { data } = await api.get('/api/recently-viewed');
+  return data;
+}
+
+export async function recordRecentlyViewed(
+  ticker: string,
+  companyName: string | null,
+  grade: string | null,
+  signal: string | null,
+  score: number | null,
+): Promise<RecentlyViewedItem> {
+  const { data } = await api.post('/api/recently-viewed', {
+    ticker,
+    company_name: companyName,
+    grade,
+    signal,
+    score,
   });
   return data;
 }

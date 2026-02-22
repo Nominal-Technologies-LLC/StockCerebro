@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Header from './components/layout/Header';
 import SearchBar from './components/layout/SearchBar';
 import TabNavigation from './components/layout/TabNavigation';
+import RecentlyViewedSidebar from './components/layout/RecentlyViewedSidebar';
 import CompanyHeader from './components/overview/CompanyHeader';
 import QuickStats from './components/overview/QuickStats';
 import OverallScorecard from './components/overview/OverallScorecard';
@@ -19,7 +20,7 @@ import PricingPage from './components/subscription/PricingPage';
 import PaywallGate from './components/subscription/PaywallGate';
 import MacroUpgradePrompt from './components/subscription/MacroUpgradePrompt';
 import { useAuth } from './context/AuthContext';
-import { useCompanyOverview, useFundamental, useEarnings, useScorecard, useNews, useMacroRisk } from './hooks/useStockData';
+import { useCompanyOverview, useFundamental, useEarnings, useScorecard, useNews, useMacroRisk, useRecentlyViewed, useRecordView } from './hooks/useStockData';
 import { validateTicker } from './api/client';
 
 function AppContent() {
@@ -41,6 +42,25 @@ function AppContent() {
     activeTab === 'macro' && hasMacroAccess
   );
 
+  // Recently viewed
+  const { data: recentlyViewed } = useRecentlyViewed();
+  const recordView = useRecordView();
+  const lastRecordedRef = useRef<string>('');
+
+  // Record view when scorecard data loads for a new ticker
+  useEffect(() => {
+    if (scorecard && company && ticker && lastRecordedRef.current !== ticker) {
+      lastRecordedRef.current = ticker;
+      recordView.mutate({
+        ticker,
+        companyName: company.name,
+        grade: scorecard.grade,
+        signal: scorecard.signal,
+        score: scorecard.overall_score,
+      });
+    }
+  }, [scorecard, company, ticker]);
+
   const handleSearch = async (t: string) => {
     setTickerError('');
     setIsValidating(true);
@@ -55,12 +75,20 @@ function AppContent() {
     setShowAdmin(false);
   };
 
+  const handleRecentSelect = (t: string) => {
+    setTickerError('');
+    setTicker(t);
+    setActiveTab('overview');
+    setShowAdmin(false);
+  };
+
   const isLoading = companyLoading || isValidating;
+  const hasRecentItems = (recentlyViewed?.length ?? 0) > 0;
 
   return (
     <div className="min-h-screen bg-gray-950">
       <Header showAdmin={showAdmin} onToggleAdmin={() => setShowAdmin(!showAdmin)} />
-      <main className="max-w-7xl mx-auto px-4 py-6">
+      <div className="max-w-[1440px] mx-auto px-4 py-6">
         {showAdmin ? (
           <ErrorBoundary>
             <AdminDashboard />
@@ -75,101 +103,120 @@ function AppContent() {
               )}
             </div>
 
-            {/* No ticker state */}
-            {!ticker && (
-              <div className="text-center py-20">
-                <h2 className="text-2xl font-bold text-gray-600 mb-2">Enter a ticker to begin</h2>
-                <p className="text-gray-700 text-sm">
-                  Get comprehensive fundamental + technical analysis with buy/sell/hold signals
-                </p>
-              </div>
-            )}
-
-            {/* Loading */}
-            {ticker && isLoading && !companyError && (
-              <LoadingSpinner message={`Analyzing ${ticker}...`} />
-            )}
-
-            {/* Error */}
-            {ticker && companyError && !isLoading && (
-              <div className="card border-red-500/30 text-center py-8">
-                <p className="text-red-400 font-medium">
-                  Could not find ticker &quot;{ticker}&quot;
-                </p>
-                <p className="text-gray-500 text-sm mt-1">
-                  Check the symbol and try again
-                </p>
-              </div>
-            )}
-
-            {/* Content */}
-            {company && !companyError && (
-              <>
-                <CompanyHeader company={company} />
-                <TabNavigation
-                  activeTab={activeTab}
-                  onTabChange={setActiveTab}
-                  isEtf={isEtf}
-                  hasMacroAccess={hasMacroAccess}
-                />
-
-                {activeTab === 'overview' && (
-                  <ErrorBoundary>
-                    <div className="space-y-6">
-                      {scorecard && <OverallScorecard scorecard={scorecard} />}
-                      {scorecardLoading && <LoadingSpinner message="Computing scorecard..." />}
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        <QuickStats company={company} />
-                        <NewsFeed articles={news ?? []} />
-                      </div>
-                    </div>
-                  </ErrorBoundary>
+            {/* Main layout with sidebar */}
+            <div className={`flex gap-6 ${hasRecentItems ? 'flex-col xl:flex-row' : ''}`}>
+              {/* Main content */}
+              <main className={`${hasRecentItems ? 'flex-1 min-w-0' : 'w-full'} max-w-7xl ${!hasRecentItems ? 'mx-auto' : ''}`}>
+                {/* No ticker state */}
+                {!ticker && (
+                  <div className="text-center py-20">
+                    <h2 className="text-2xl font-bold text-gray-600 mb-2">Enter a ticker to begin</h2>
+                    <p className="text-gray-700 text-sm">
+                      Get comprehensive fundamental + technical analysis with buy/sell/hold signals
+                    </p>
+                  </div>
                 )}
 
-                {activeTab === 'fundamental' && !isEtf && (
-                  <ErrorBoundary>
-                    {fundLoading && <LoadingSpinner message="Analyzing fundamentals..." />}
-                    {fundamental && <FundamentalDashboard data={fundamental} />}
-                  </ErrorBoundary>
+                {/* Loading */}
+                {ticker && isLoading && !companyError && (
+                  <LoadingSpinner message={`Analyzing ${ticker}...`} />
                 )}
 
-                {activeTab === 'earnings' && !isEtf && (
-                  <ErrorBoundary>
-                    {earningsLoading && <LoadingSpinner message="Loading earnings..." />}
-                    {earnings && <EarningsDashboard data={earnings} />}
-                  </ErrorBoundary>
+                {/* Error */}
+                {ticker && companyError && !isLoading && (
+                  <div className="card border-red-500/30 text-center py-8">
+                    <p className="text-red-400 font-medium">
+                      Could not find ticker &quot;{ticker}&quot;
+                    </p>
+                    <p className="text-gray-500 text-sm mt-1">
+                      Check the symbol and try again
+                    </p>
+                  </div>
                 )}
 
-                {activeTab === 'macro' && (
-                  <ErrorBoundary>
-                    {hasMacroAccess ? (
-                      <>
-                        {macroLoading && <LoadingSpinner message="Analyzing macro factors..." />}
-                        {macroRisk && <MacroDashboard data={macroRisk} />}
-                      </>
-                    ) : (
-                      <MacroUpgradePrompt />
+                {/* Content */}
+                {company && !companyError && (
+                  <>
+                    <CompanyHeader company={company} />
+                    <TabNavigation
+                      activeTab={activeTab}
+                      onTabChange={setActiveTab}
+                      isEtf={isEtf}
+                      hasMacroAccess={hasMacroAccess}
+                    />
+
+                    {activeTab === 'overview' && (
+                      <ErrorBoundary>
+                        <div className="space-y-6">
+                          {scorecard && <OverallScorecard scorecard={scorecard} />}
+                          {scorecardLoading && <LoadingSpinner message="Computing scorecard..." />}
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <QuickStats company={company} />
+                            <NewsFeed articles={news ?? []} />
+                          </div>
+                        </div>
+                      </ErrorBoundary>
                     )}
-                  </ErrorBoundary>
-                )}
 
-                {activeTab === 'technical' && (
-                  <ErrorBoundary>
-                    <TechnicalDashboard ticker={ticker} />
-                  </ErrorBoundary>
-                )}
+                    {activeTab === 'fundamental' && !isEtf && (
+                      <ErrorBoundary>
+                        {fundLoading && <LoadingSpinner message="Analyzing fundamentals..." />}
+                        {fundamental && <FundamentalDashboard data={fundamental} />}
+                      </ErrorBoundary>
+                    )}
 
-                {activeTab === 'scorecard' && (
-                  <ErrorBoundary>
-                    {scorecardLoading && <LoadingSpinner message="Generating scorecard..." />}
-                    {scorecard && <ScorecardDashboard data={scorecard} />}
-                  </ErrorBoundary>
+                    {activeTab === 'earnings' && !isEtf && (
+                      <ErrorBoundary>
+                        {earningsLoading && <LoadingSpinner message="Loading earnings..." />}
+                        {earnings && <EarningsDashboard data={earnings} />}
+                      </ErrorBoundary>
+                    )}
+
+                    {activeTab === 'macro' && (
+                      <ErrorBoundary>
+                        {hasMacroAccess ? (
+                          <>
+                            {macroLoading && <LoadingSpinner message="Analyzing macro factors..." />}
+                            {macroRisk && <MacroDashboard data={macroRisk} />}
+                          </>
+                        ) : (
+                          <MacroUpgradePrompt />
+                        )}
+                      </ErrorBoundary>
+                    )}
+
+                    {activeTab === 'technical' && (
+                      <ErrorBoundary>
+                        <TechnicalDashboard ticker={ticker} />
+                      </ErrorBoundary>
+                    )}
+
+                    {activeTab === 'scorecard' && (
+                      <ErrorBoundary>
+                        {scorecardLoading && <LoadingSpinner message="Generating scorecard..." />}
+                        {scorecard && <ScorecardDashboard data={scorecard} />}
+                      </ErrorBoundary>
+                    )}
+                  </>
                 )}
-              </>
-            )}
+              </main>
+
+              {/* Recently Viewed Sidebar */}
+              {hasRecentItems && (
+                <aside className="w-full xl:w-64 xl:flex-shrink-0">
+                  <div className="xl:sticky xl:top-6">
+                    <RecentlyViewedSidebar
+                      items={recentlyViewed!}
+                      currentTicker={ticker}
+                      onSelect={handleRecentSelect}
+                    />
+                  </div>
+                </aside>
+              )}
+            </div>
           </>
         )}
-      </main>
+      </div>
     </div>
   );
 }

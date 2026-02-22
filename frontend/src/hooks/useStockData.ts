@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchCompanyOverview,
   fetchFundamental,
@@ -7,6 +7,8 @@ import {
   fetchNews,
   fetchEarnings,
   fetchMacroRisk,
+  fetchRecentlyViewed,
+  recordRecentlyViewed,
 } from '../api/client';
 import { getRefreshInterval } from '../utils/marketHours';
 
@@ -70,5 +72,36 @@ export function useMacroRisk(ticker: string, enabled = true) {
     queryFn: () => fetchMacroRisk(ticker),
     enabled: !!ticker && enabled,
     staleTime: 30 * 60_000,
+  });
+}
+
+export function useRecentlyViewed() {
+  return useQuery({
+    queryKey: ['recently-viewed'],
+    queryFn: fetchRecentlyViewed,
+    staleTime: 60_000,
+  });
+}
+
+export function useRecordView() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: {
+      ticker: string;
+      companyName: string | null;
+      grade: string | null;
+      signal: string | null;
+      score: number | null;
+    }) =>
+      recordRecentlyViewed(
+        params.ticker,
+        params.companyName,
+        params.grade,
+        params.signal,
+        params.score,
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['recently-viewed'] });
+    },
   });
 }
