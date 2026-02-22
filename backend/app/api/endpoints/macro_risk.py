@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_current_user
+from app.api.dependencies import require_paid_subscription
 from app.api.validation import validate_ticker
 from app.database import get_db
 from app.models.user import User
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/stock", tags=["macro"])
 async def get_macro_risk(
     ticker: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_paid_subscription),
 ):
     ticker = validate_ticker(ticker)
     aggregator = DataAggregator(db)

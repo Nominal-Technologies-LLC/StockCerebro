@@ -9,7 +9,7 @@ import type {
   EarningsResponse,
   MacroRiskResponse,
 } from '../types/stock';
-import type { TokenResponse, User } from '../types/auth';
+import type { AdminUser, SubscriptionInfo, TokenResponse, User } from '../types/auth';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -88,4 +88,39 @@ export async function logout(): Promise<void> {
 export async function getCurrentUser(): Promise<User> {
   const { data } = await api.get('/api/auth/me');
   return data;
+}
+
+// Subscription API functions
+export async function fetchSubscriptionStatus(): Promise<SubscriptionInfo> {
+  const { data } = await api.get('/api/subscription/status');
+  return data;
+}
+
+export async function createCheckoutSession(successUrl: string, cancelUrl: string): Promise<{ checkout_url: string }> {
+  const { data } = await api.post('/api/subscription/create-checkout-session', {
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+  });
+  return data;
+}
+
+export async function createPortalSession(returnUrl: string): Promise<{ portal_url: string }> {
+  const { data } = await api.post('/api/subscription/create-portal-session', {
+    return_url: returnUrl,
+  });
+  return data;
+}
+
+// Admin API functions
+export async function fetchAdminUsers(): Promise<AdminUser[]> {
+  const { data } = await api.get('/api/admin/users');
+  return data;
+}
+
+export async function overrideUserSubscription(userId: number): Promise<void> {
+  await api.post(`/api/admin/users/${userId}/override-subscription`);
+}
+
+export async function removeUserOverride(userId: number): Promise<void> {
+  await api.post(`/api/admin/users/${userId}/remove-override`);
 }

@@ -29,6 +29,11 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret-change-in-production}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_PRICE_ID: ${STRIPE_PRICE_ID:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
     depends_on:
@@ -46,6 +51,7 @@ services:
     environment:
       VITE_API_URL: http://localhost:8000
       VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      VITE_STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
     depends_on:
       - backend
 

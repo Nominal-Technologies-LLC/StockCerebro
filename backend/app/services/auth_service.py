@@ -48,13 +48,14 @@ class AuthService:
             await self.db.refresh(user)
             return user
 
-        # Create new user
+        # Create new user with free trial
         user = User(
             google_id=google_id,
             email=email,
             name=name,
             picture=picture
         )
+        user.init_trial()
         self.db.add(user)
         await self.db.commit()
         await self.db.refresh(user)

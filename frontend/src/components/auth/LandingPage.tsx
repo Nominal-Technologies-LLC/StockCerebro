@@ -221,14 +221,28 @@ function FeatureCard({ feature, index }: { feature: (typeof features)[number]; i
 }
 
 // ── Main Landing Page ───────────────────────────────────────────────
-export default function LandingPage() {
+interface LandingPageProps {
+  onViewPricing?: () => void;
+}
+
+export default function LandingPage({ onViewPricing }: LandingPageProps) {
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
       {/* ─── Sticky Header ─── */}
       <header className="sticky top-0 z-50 bg-gray-950/80 backdrop-blur-md border-b border-gray-800/50">
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
           <span className="text-xl font-bold text-white tracking-tight">StockCerebro</span>
-          <GoogleSignInButton width={200} />
+          <div className="flex items-center gap-4">
+            {onViewPricing && (
+              <button
+                onClick={onViewPricing}
+                className="text-sm font-medium text-gray-400 hover:text-white transition-colors"
+              >
+                Pricing
+              </button>
+            )}
+            <GoogleSignInButton width={200} />
+          </div>
         </div>
       </header>
 
@@ -249,8 +263,18 @@ export default function LandingPage() {
             Multi-source fundamental and technical analysis with actionable buy/sell signals.
             Aggregate data from Yahoo Finance, Finnhub, and SEC EDGAR in one unified dashboard.
           </p>
-          <div className="flex justify-center">
+          <div className="flex flex-col items-center gap-4">
             <GoogleSignInButton width={300} />
+            <p className="text-sm text-gray-500">
+              Free 7-day trial &middot;{' '}
+              {onViewPricing ? (
+                <button onClick={onViewPricing} className="text-blue-400 hover:text-blue-300 transition-colors">
+                  View pricing
+                </button>
+              ) : (
+                <span>No credit card required</span>
+              )}
+            </p>
           </div>
         </div>
       </section>
@@ -277,10 +301,18 @@ export default function LandingPage() {
         <RevealSection className="relative max-w-3xl mx-auto px-4 py-24 text-center">
           <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">Ready to Analyze?</h2>
           <p className="text-gray-400 mb-8 text-lg">
-            Sign in and start making smarter investment decisions today.
+            Start your free 7-day trial and make smarter investment decisions today.
           </p>
-          <div className="flex justify-center">
+          <div className="flex flex-col items-center gap-4">
             <GoogleSignInButton width={300} />
+            {onViewPricing && (
+              <button
+                onClick={onViewPricing}
+                className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
+              >
+                View pricing details
+              </button>
+            )}
           </div>
         </RevealSection>
       </section>
