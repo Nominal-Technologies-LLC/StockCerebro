@@ -20,12 +20,15 @@ import PaywallGate from './components/subscription/PaywallGate';
 import MacroUpgradePrompt from './components/subscription/MacroUpgradePrompt';
 import { useAuth } from './context/AuthContext';
 import { useCompanyOverview, useFundamental, useEarnings, useScorecard, useNews, useMacroRisk } from './hooks/useStockData';
+import { validateTicker } from './api/client';
 
 function AppContent() {
   const { hasMacroAccess } = useAuth();
   const [ticker, setTicker] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
   const [showAdmin, setShowAdmin] = useState(false);
+  const [tickerError, setTickerError] = useState('');
+  const [isValidating, setIsValidating] = useState(false);
 
   const { data: company, isLoading: companyLoading, error: companyError } = useCompanyOverview(ticker);
   const isEtf = company?.is_etf ?? false;
@@ -38,13 +41,21 @@ function AppContent() {
     activeTab === 'macro' && hasMacroAccess
   );
 
-  const handleSearch = (t: string) => {
+  const handleSearch = async (t: string) => {
+    setTickerError('');
+    setIsValidating(true);
+    const valid = await validateTicker(t);
+    setIsValidating(false);
+    if (!valid) {
+      setTickerError(`Ticker "${t}" not found. Check the symbol and try again.`);
+      return;
+    }
     setTicker(t);
     setActiveTab('overview');
     setShowAdmin(false);
   };
 
-  const isLoading = companyLoading;
+  const isLoading = companyLoading || isValidating;
 
   return (
     <div className="min-h-screen bg-gray-950">
@@ -57,8 +68,11 @@ function AppContent() {
         ) : (
           <>
             {/* Search */}
-            <div className="flex justify-center mb-8">
-              <SearchBar onSearch={handleSearch} isLoading={isLoading} />
+            <div className="flex flex-col items-center mb-8 gap-2">
+              <SearchBar onSearch={handleSearch} isLoading={isLoading} onInputChange={() => setTickerError('')} />
+              {tickerError && (
+                <p className="text-red-400 text-sm">{tickerError}</p>
+              )}
             </div>
 
             {/* No ticker state */}

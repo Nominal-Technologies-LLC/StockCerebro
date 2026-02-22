@@ -3,9 +3,10 @@ import { useState } from 'react';
 interface Props {
   onSearch: (ticker: string) => void;
   isLoading?: boolean;
+  onInputChange?: () => void;
 }
 
-export default function SearchBar({ onSearch, isLoading }: Props) {
+export default function SearchBar({ onSearch, isLoading, onInputChange }: Props) {
   const [input, setInput] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -21,7 +22,7 @@ export default function SearchBar({ onSearch, isLoading }: Props) {
       <input
         type="text"
         value={input}
-        onChange={(e) => setInput(e.target.value)}
+        onChange={(e) => { setInput(e.target.value); onInputChange?.(); }}
         placeholder="Enter ticker (e.g. AAPL)"
         className="flex-1 px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 uppercase"
         maxLength={10}
