@@ -22,9 +22,10 @@
       "Bash(ls:*)",
       "Bash(npx tsc:*)",
       "Bash(xxd:*)",
-      "Skill(keybindings-help)",
       "Bash(git checkout:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }
