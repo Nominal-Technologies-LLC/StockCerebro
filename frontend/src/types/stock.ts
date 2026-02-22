@@ -195,6 +195,11 @@ export interface QuarterlyEarnings {
   net_income_qoq: number | null;
   revenue_yoy: number | null;
   net_income_yoy: number | null;
+  eps_actual: number | null;
+  eps_estimate: number | null;
+  eps_surprise_pct: number | null;
+  revenue_estimate: number | null;
+  revenue_surprise_pct: number | null;
   filing_url: string | null;
   filing_date: string | null;
 }
