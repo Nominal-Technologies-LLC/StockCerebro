@@ -70,6 +70,15 @@ export async function fetchMacroRisk(ticker: string): Promise<MacroRiskResponse>
   return data;
 }
 
+export async function validateTicker(ticker: string): Promise<boolean> {
+  try {
+    await api.get(`/api/stock/${ticker}/validate`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function healthCheck(): Promise<{ status: string }> {
   const { data } = await api.get('/api/health');
   return data;
