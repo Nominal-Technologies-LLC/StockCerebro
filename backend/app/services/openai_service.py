@@ -9,7 +9,9 @@ logger = logging.getLogger(__name__)
 
 MODEL = "gpt-5.1"
 
-SYSTEM_PROMPT = """You are a macro-economic analyst. Given a company's profile, recent news, and key financial metrics, identify the most important macro tailwinds and headwinds affecting this stock.
+_SYSTEM_PROMPT_TEMPLATE = """Today's date: {today}
+
+You are a macro-economic analyst. Given a company's profile, recent news, and key financial metrics, identify the most important macro tailwinds and headwinds affecting this stock.
 
 Respond ONLY with valid JSON in this exact format:
 {
@@ -34,10 +36,15 @@ Respond ONLY with valid JSON in this exact format:
 
 Rules:
 - Provide 3-5 tailwinds and 3-5 headwinds
-- Focus on current, real macro factors (interest rates, trade policy, sector trends, regulation, geopolitics)
+- Focus on current, real macro factors (interest rates, trade policy, sector trends, regulation, geopolitics, competitor actions)
 - Be specific to this company's sector and business model
-- Impact levels: high = directly affects revenue/margins, medium = indirect but material, low = background factor
+- Impact levels: high = directly affects revenue/margins/market share/TAM, medium = indirect but material, low = background factor
 """
+
+
+def _build_system_prompt() -> str:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return _SYSTEM_PROMPT_TEMPLATE.format(today=today)
 
 
 class OpenAIService:
@@ -90,13 +97,17 @@ class OpenAIService:
 
         user_prompt = "\n\n".join(parts)
 
+        import openai
+
         try:
             response = await self.client.chat.completions.create(
                 model=MODEL,
-                max_tokens=1500,
+                max_tokens=2000,
+                temperature=0.3,
+                timeout=30.0,
                 response_format={"type": "json_object"},
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": _build_system_prompt()},
                     {"role": "user", "content": user_prompt},
                 ],
             )
@@ -119,6 +130,15 @@ class OpenAIService:
                 model_used=MODEL,
             )
 
+        except openai.AuthenticationError as e:
+            logger.error(f"OpenAI authentication failed for {ticker} — check OPENAI_API_KEY: {e}")
+            return None
+        except openai.RateLimitError as e:
+            logger.warning(f"OpenAI rate limit hit for {ticker}, will retry on next request: {e}")
+            return None
+        except openai.APITimeoutError as e:
+            logger.warning(f"OpenAI request timed out for {ticker}: {e}")
+            return None
         except Exception as e:
             logger.error(f"OpenAI API error for {ticker}: {e}")
             return None

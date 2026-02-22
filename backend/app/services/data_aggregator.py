@@ -515,19 +515,21 @@ class DataAggregator:
 
         settings = get_settings()
 
-        # Check cache (6h TTL)
+        # Check cache — success responses use 6h TTL, error responses use 5min TTL
         cached = await self.cache.get_analysis(ticker, "macro_risk", ttl=settings.macro_risk_cache_ttl)
         if cached:
             return MacroRiskResponse(**cached)
+        cached_error = await self.cache.get_analysis(ticker, "macro_risk_error", ttl=300)
+        if cached_error:
+            return MacroRiskResponse(**cached_error)
 
-        # If OpenAI not configured, return error response
+        # If OpenAI not configured, return error response (cached 5 min)
         if not self.openai.is_configured:
             error_resp = MacroRiskResponse(
                 ticker=ticker,
                 error="Macro analysis unavailable: OPENAI_API_KEY not configured",
             )
-            # Cache briefly (5 min) so we don't spam logs
-            await self.cache.set_analysis(ticker, "macro_risk", error_resp.model_dump())
+            await self.cache.set_analysis(ticker, "macro_risk_error", error_resp.model_dump())
             return error_resp
 
         # Gather company context concurrently
@@ -540,6 +542,10 @@ class DataAggregator:
             return_exceptions=True,
         )
 
+        for label, result in (("profile", profile), ("metrics", metrics), ("news", news)):
+            if isinstance(result, Exception):
+                logger.warning(f"Finnhub {label} fetch failed for {ticker}: {result}")
+
         # Extract context
         company_name = None
         sector = None
@@ -551,17 +557,32 @@ class DataAggregator:
             if mc:
                 market_cap = mc * 1_000_000
 
+        _METRIC_LABELS = {
+            "peBasicExclExtraTTM": "P/E Ratio",
+            "revenueGrowthTTMYoy": "Revenue Growth (YoY)",
+            "epsGrowth5Y": "EPS Growth (5Y)",
+            "dividendYieldIndicatedAnnual": "Dividend Yield",
+            "beta": "Beta",
+            "netMarginTTM": "Net Margin",
+        }
         key_metrics = {}
         if isinstance(metrics, dict) and metrics:
             m = metrics.get("metric", {})
-            for key in ("peBasicExclExtraTTM", "revenueGrowthTTMYoy", "epsGrowth5Y",
-                         "dividendYieldIndicatedAnnual", "beta", "netMarginTTM"):
+            for key, label in _METRIC_LABELS.items():
                 if m.get(key) is not None:
-                    key_metrics[key] = m[key]
+                    key_metrics[label] = m[key]
 
         news_headlines = []
         if isinstance(news, list):
-            news_headlines = [n.get("headline", "") for n in news[:10] if n.get("headline")]
+            for n in news[:10]:
+                headline = n.get("headline", "")
+                if not headline:
+                    continue
+                summary = n.get("summary", "").strip()
+                if summary and summary != headline:
+                    news_headlines.append(f"{headline}\n    {summary}")
+                else:
+                    news_headlines.append(headline)
 
         result = await self.openai.get_macro_risk(
             ticker=ticker,
@@ -579,6 +600,9 @@ class DataAggregator:
                 sector=sector,
                 error="Macro analysis failed: OpenAI API call unsuccessful",
             )
+            # Cache errors briefly (5 min) so transient failures don't lock out retries
+            await self.cache.set_analysis(ticker, "macro_risk_error", result.model_dump())
+            return result
 
         await self.cache.set_analysis(ticker, "macro_risk", result.model_dump())
         return result

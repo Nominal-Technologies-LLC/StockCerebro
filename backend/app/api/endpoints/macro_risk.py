@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user
@@ -19,7 +19,4 @@ async def get_macro_risk(
 ):
     ticker = validate_ticker(ticker)
     aggregator = DataAggregator(db)
-    result = await aggregator.get_macro_risk(ticker)
-    if not result:
-        raise HTTPException(status_code=404, detail=f"No macro analysis available for '{ticker}'")
-    return result
+    return await aggregator.get_macro_risk(ticker)

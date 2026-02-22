@@ -1,6 +1,6 @@
 # StockCerebro
 
-A stock analysis dashboard that scores companies across fundamental, technical, and financial health dimensions using data from Yahoo Finance, Finnhub, and SEC EDGAR.
+A stock analysis dashboard that scores companies across fundamental, technical, and financial health dimensions using data from Yahoo Finance, Finnhub, and SEC EDGAR. Includes a Macro tab powered by OpenAI GPT that identifies tailwinds and headwinds for any stock based on live news and financial metrics.
 
 **Stack:** React / Vite / TypeScript / Tailwind (frontend) + FastAPI / SQLAlchemy / PostgreSQL (backend), all running in Docker.
 
@@ -8,6 +8,8 @@ A stock analysis dashboard that scores companies across fundamental, technical, 
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
 - A free [Finnhub API key](https://finnhub.io/register)
+- Google OAuth2 credentials (for login) — create a project at [console.cloud.google.com](https://console.cloud.google.com/) and enable the Google Sign-In API
+- _(Optional)_ An [OpenAI API key](https://platform.openai.com/api-keys) to enable the Macro Risk tab
 
 ## Getting Started
 
@@ -26,19 +28,16 @@ Copy the example env file and fill in your API key:
 cp .env.example .env
 ```
 
-Edit `.env`:
-
-```
-DB_PASSWORD=stockcerebro_dev_password
-FINNHUB_API_KEY=your_finnhub_api_key_here
-EDGAR_USER_AGENT=your_email@example.com
-```
+Edit `.env` (see `.env.example` for all fields):
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DB_PASSWORD` | Yes | PostgreSQL password (default works for local dev) |
-| `FINNHUB_API_KEY` | Yes | Free API key from [finnhub.io](https://finnhub.io/) |
+| `DB_PASSWORD` | Yes | PostgreSQL password (any value works for local dev) |
+| `FINNHUB_API_KEY` | Yes | Free key from [finnhub.io](https://finnhub.io/) |
 | `EDGAR_USER_AGENT` | Yes | Your email — required by SEC EDGAR's fair access policy |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Yes | Google OAuth2 credentials for login |
+| `JWT_SECRET_KEY` | Yes | Any long random string for signing session tokens |
+| `OPENAI_API_KEY` | No | Enables the Macro tab (GPT-5.1). Without it, the tab shows an unavailable message. |
 
 ### 3. Start the application
 

@@ -62,7 +62,6 @@ export default function MacroDashboard({ data }: Props) {
           <p className="text-sm text-gray-300">{data.summary}</p>
           <div className="flex items-center gap-3 mt-2 text-[10px] text-gray-600">
             {data.analyzed_at && <span>Analyzed: {new Date(data.analyzed_at).toLocaleString()}</span>}
-            {data.model_used && <span>Model: {data.model_used}</span>}
           </div>
         </div>
       )}

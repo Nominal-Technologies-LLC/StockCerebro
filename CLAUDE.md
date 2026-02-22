@@ -31,7 +31,7 @@ Three Docker services: React/Vite/TypeScript frontend, FastAPI/Python backend, P
 
 **Entry point**: `backend/app/main.py` — creates FastAPI app, registers routers, creates DB tables on startup (no Alembic migrations yet).
 
-**API endpoints** (`backend/app/api/endpoints/`): auth, stock, fundamental, technical, scorecard, news, earnings. All endpoints except `/health` require authentication via JWT in HTTP-only cookie. Standard pattern:
+**API endpoints** (`backend/app/api/endpoints/`): auth, stock, fundamental, technical, scorecard, news, earnings, macro. All endpoints except `/health` require authentication via JWT in HTTP-only cookie. Standard pattern:
 
 ```python
 @router.get("/{ticker}/endpoint", response_model=Schema)
@@ -47,6 +47,7 @@ async def endpoint(ticker, db=Depends(get_db), current_user=Depends(get_current_
 2. Finnhub (`finnhub_service.py`) — fundamentals, company profile, news, quarterly financials. Rate-limited to 60 calls/min.
 3. SEC EDGAR (`edgar_service.py`) — quarterly financials fallback.
 4. yfinance (`yfinance_service.py`) — last-resort fallback.
+5. OpenAI (`openai_service.py`) — macro risk analysis (GPT-5.1). Sends company profile, 6 key metrics, and up to 10 news headline+summary pairs; returns structured JSON with tailwinds, headwinds, and a summary.
 
 **Analysis engines** (`backend/app/analysis/`):
 - `fundamental_analyzer.py` — health scoring (FCF, OCF, IC, D/E, CR; banks use ROE/ROA instead), valuation (peer-relative), growth (QoQ revenue + earnings).
@@ -54,13 +55,13 @@ async def endpoint(ticker, db=Depends(get_db), current_user=Depends(get_current_
 - `scorecard_engine.py` — combines fundamental + technical with override rules (e.g., weak fundamentals + strong technicals caps at HOLD).
 - `grading.py` — score → letter grade. Centered at 50=C (A=80+, B=65+, C=50+, D=30+, F<30).
 
-**Caching** (`backend/app/services/cache_manager.py`): Database-backed with TTLs. Prices: 15min during market hours / 24h when closed. Fundamentals/company: 24h. News: 1h. Analysis: 30min.
+**Caching** (`backend/app/services/cache_manager.py`): Database-backed with TTLs. Prices: 15min during market hours / 24h when closed. Fundamentals/company: 24h. News: 1h. Analysis: 30min. Macro risk: 6h for successful responses (`"macro_risk"` key), 5min for error responses (`"macro_risk_error"` key) so transient failures don't lock out retries.
 
 **Quarterly data pitfall**: Finnhub returns cumulative YTD figures for Q2/Q3. `xbrl_mapper.py` detects this (period >120 days) and de-accumulates to standalone quarters.
 
 ### Frontend
 
-**Entry**: `frontend/src/main.tsx` → `App.tsx`. Protected by Google OAuth2 auth. Tab navigation: overview, fundamental, earnings, technical, scorecard. ETFs disable fundamental/earnings tabs.
+**Entry**: `frontend/src/main.tsx` → `App.tsx`. Protected by Google OAuth2 auth. Tab navigation: overview, fundamental, earnings, technical, scorecard, macro. ETFs disable fundamental/earnings tabs.
 
 **State management**: TanStack Query (React Query) with market-hour-aware stale times. API client in `frontend/src/api/client.ts` uses Axios with `withCredentials: true`.
 
