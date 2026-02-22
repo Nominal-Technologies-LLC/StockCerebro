@@ -12,6 +12,11 @@ class QuarterlyEarnings(BaseModel):
     net_income_qoq: float | None = None
     revenue_yoy: float | None = None  # % change vs same quarter last year
     net_income_yoy: float | None = None
+    eps_actual: float | None = None  # Reported EPS
+    eps_estimate: float | None = None  # Consensus analyst estimate
+    eps_surprise_pct: float | None = None  # % beat/miss vs estimate
+    revenue_estimate: float | None = None  # Consensus revenue estimate
+    revenue_surprise_pct: float | None = None  # % beat/miss vs estimate
     filing_url: str | None = None  # SEC.gov direct link to 10-Q
     filing_date: str | None = None  # Date the 10-Q was filed
 

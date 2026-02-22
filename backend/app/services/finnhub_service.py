@@ -76,6 +76,11 @@ class FinnhubService:
             return result["data"]
         return None
 
+    async def get_earnings_surprises(self, ticker: str) -> list | None:
+        """Get quarterly EPS actual vs estimate (surprise data)."""
+        result = await self._get("/stock/earnings", {"symbol": ticker, "limit": 12})
+        return result if isinstance(result, list) else None
+
     async def get_news(self, ticker: str) -> list | None:
         from datetime import datetime, timedelta
         today = datetime.now().strftime("%Y-%m-%d")
