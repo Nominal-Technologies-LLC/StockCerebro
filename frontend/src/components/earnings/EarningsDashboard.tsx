@@ -17,6 +17,19 @@ function DeltaBadge({ value, label }: { value: number | null; label: string }) {
   );
 }
 
+function SurpriseBadge({ value }: { value: number | null }) {
+  if (value == null) return null;
+  const beat = value > 0;
+  const miss = value < 0;
+  const bg = beat ? 'bg-green-500/15 text-green-400' : miss ? 'bg-red-500/15 text-red-400' : 'bg-gray-500/15 text-gray-400';
+  const label = beat ? 'Beat' : miss ? 'Miss' : 'Met';
+  return (
+    <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${bg}`}>
+      {label} {value > 0 ? '+' : ''}{value.toFixed(1)}%
+    </span>
+  );
+}
+
 function QuarterCard({ quarter, defaultExpanded }: { quarter: QuarterlyEarnings; defaultExpanded: boolean }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
@@ -32,6 +45,9 @@ function QuarterCard({ quarter, defaultExpanded }: { quarter: QuarterlyEarnings;
             <span className="text-sm text-gray-400">
               Rev: {formatLargeNumber(quarter.revenue)}
             </span>
+          )}
+          {quarter.eps_surprise_pct != null && (
+            <SurpriseBadge value={quarter.eps_surprise_pct} />
           )}
           {quarter.filing_url && (
             <a
@@ -70,10 +86,38 @@ function QuarterCard({ quarter, defaultExpanded }: { quarter: QuarterlyEarnings;
               <span className="text-sm font-medium text-gray-200">
                 {quarter.revenue != null ? formatLargeNumber(quarter.revenue) : 'N/A'}
               </span>
+              {quarter.revenue_estimate != null && (
+                <span className="text-xs text-gray-500">
+                  Est: {formatLargeNumber(quarter.revenue_estimate)}
+                </span>
+              )}
+              {quarter.revenue_surprise_pct != null && (
+                <SurpriseBadge value={quarter.revenue_surprise_pct} />
+              )}
               <DeltaBadge value={quarter.revenue_qoq} label="QoQ" />
               <DeltaBadge value={quarter.revenue_yoy} label="YoY" />
             </div>
           </div>
+
+          {/* EPS */}
+          {(quarter.eps_actual != null || quarter.eps_estimate != null) && (
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-500">EPS</span>
+              <div className="flex items-center gap-3">
+                {quarter.eps_actual != null && (
+                  <span className="text-sm font-medium text-gray-200">
+                    ${quarter.eps_actual.toFixed(2)}
+                  </span>
+                )}
+                {quarter.eps_estimate != null && (
+                  <span className="text-xs text-gray-500">
+                    Est: ${quarter.eps_estimate.toFixed(2)}
+                  </span>
+                )}
+                <SurpriseBadge value={quarter.eps_surprise_pct} />
+              </div>
+            </div>
+          )}
 
           {/* Net Income */}
           <div className="flex items-center justify-between">

@@ -105,6 +105,28 @@ def _match_filing(period_end: str, filing_map: dict[str, dict]) -> dict | None:
         return None
 
 
+def _match_surprise(period_end: str, surprise_map: dict[str, dict]) -> dict | None:
+    """Match a quarterly period end to Finnhub surprise data (exact or ±35 days)."""
+    if period_end in surprise_map:
+        return surprise_map[period_end]
+    try:
+        target = datetime.strptime(period_end, "%Y-%m-%d")
+        best_match = None
+        best_diff = 36
+        for date_str, data in surprise_map.items():
+            try:
+                candidate = datetime.strptime(date_str, "%Y-%m-%d")
+                diff = abs((candidate - target).days)
+                if diff < best_diff:
+                    best_diff = diff
+                    best_match = data
+            except (ValueError, TypeError):
+                continue
+        return best_match
+    except (ValueError, TypeError):
+        return None
+
+
 class DataAggregator:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -377,8 +399,24 @@ class DataAggregator:
                 data_source = source
                 break
 
-        # Get SEC filing URLs (best-effort)
-        filing_map = await self._get_filing_urls(ticker)
+        # Get SEC filing URLs and earnings surprises concurrently
+        filing_map, surprises_raw = await asyncio.gather(
+            self._get_filing_urls(ticker),
+            self.finnhub.get_earnings_surprises(ticker),
+            return_exceptions=True,
+        )
+        if isinstance(filing_map, Exception):
+            filing_map = None
+        if isinstance(surprises_raw, Exception):
+            surprises_raw = None
+
+        # Index surprise data by period date for fast lookup
+        surprise_map: dict[str, dict] = {}
+        if surprises_raw:
+            for s in surprises_raw:
+                p = s.get("period")
+                if p:
+                    surprise_map[p] = s
 
         # Build quarter list sorted most-recent-first
         periods = sorted(quarterly.keys(), reverse=True)[:8]
@@ -424,6 +462,25 @@ class DataAggregator:
                     filing_url = match.get("url")
                     filing_date = match.get("filed")
 
+            # Match earnings surprise data (try exact date, then fuzzy ±35 days)
+            eps_actual = None
+            eps_estimate = None
+            eps_surprise_pct = None
+            revenue_estimate = None
+            revenue_surprise_pct = None
+            surprise = _match_surprise(period, surprise_map)
+            if surprise:
+                eps_actual = surprise.get("actual")
+                eps_estimate = surprise.get("estimate")
+                eps_surprise_pct = surprise.get("surprisePercent")
+                # Finnhub includes revenueEstimate on some tickers
+                rev_est = surprise.get("revenueEstimate")
+                if rev_est and revenue:
+                    revenue_estimate = rev_est
+                    revenue_surprise_pct = _pct_change(revenue, rev_est)
+                    if revenue_surprise_pct is not None:
+                        revenue_surprise_pct = round(revenue_surprise_pct, 2)
+
             quarters.append(QuarterlyEarnings(
                 period_end=period,
                 period_label=_period_to_label(period),
@@ -435,6 +492,11 @@ class DataAggregator:
                 net_income_qoq=round(ni_qoq, 2) if ni_qoq is not None else None,
                 revenue_yoy=round(rev_yoy, 2) if rev_yoy is not None else None,
                 net_income_yoy=round(ni_yoy, 2) if ni_yoy is not None else None,
+                eps_actual=eps_actual,
+                eps_estimate=eps_estimate,
+                eps_surprise_pct=round(eps_surprise_pct, 2) if eps_surprise_pct is not None else None,
+                revenue_estimate=revenue_estimate,
+                revenue_surprise_pct=revenue_surprise_pct,
                 filing_url=filing_url,
                 filing_date=filing_date,
             ))
