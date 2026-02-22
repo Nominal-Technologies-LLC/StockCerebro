@@ -103,10 +103,12 @@ def score_relative(value: float, benchmark: float, lower_is_better: bool = True)
         (0.6, 80),
         (0.8, 65),
         (1.0, 50),
-        (1.2, 38),
-        (1.5, 25),
-        (2.0, 15),
-        (3.0, 5),
+        (1.3, 42),
+        (1.6, 35),
+        (2.0, 28),
+        (2.5, 20),
+        (3.5, 10),
+        (5.0, 5),
     ]
 
     # Clamp at boundaries

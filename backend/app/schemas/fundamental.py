@@ -36,6 +36,8 @@ class QualityMetrics(BaseModel):
     debt_to_equity: MetricScore = MetricScore()
     cash_conversion: MetricScore = MetricScore()
     ocf_trend: MetricScore = MetricScore()
+    current_ratio: MetricScore = MetricScore()
+    interest_coverage: MetricScore = MetricScore()
     # Bank/financial metrics (populated for Financial Services sector)
     roe: MetricScore = MetricScore()
     roa: MetricScore = MetricScore()
