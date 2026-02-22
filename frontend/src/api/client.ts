@@ -9,6 +9,7 @@ import type {
   EarningsResponse,
   MacroRiskResponse,
   RecentlyViewedItem,
+  SymbolSearchResult,
 } from '../types/stock';
 import type { AdminUser, SubscriptionInfo, TokenResponse, User } from '../types/auth';
 
@@ -19,6 +20,11 @@ const api = axios.create({
   timeout: 30000,
   withCredentials: true,  // Send HTTP-only cookies with requests
 });
+
+export async function searchSymbols(query: string): Promise<SymbolSearchResult[]> {
+  const { data } = await api.get('/api/stock/search', { params: { q: query } });
+  return data;
+}
 
 export async function fetchCompanyOverview(ticker: string): Promise<CompanyOverview> {
   const { data } = await api.get(`/api/stock/${ticker}`);

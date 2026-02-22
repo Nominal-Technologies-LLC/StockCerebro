@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchCompanyOverview,
@@ -9,8 +10,29 @@ import {
   fetchMacroRisk,
   fetchRecentlyViewed,
   recordRecentlyViewed,
+  searchSymbols,
 } from '../api/client';
 import { getRefreshInterval } from '../utils/marketHours';
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(id);
+  }, [value, delayMs]);
+  return debounced;
+}
+
+export function useSymbolSearch(query: string) {
+  const debouncedQuery = useDebouncedValue(query.trim(), 300);
+  return useQuery({
+    queryKey: ['symbol-search', debouncedQuery],
+    queryFn: () => searchSymbols(debouncedQuery),
+    enabled: debouncedQuery.length >= 1,
+    staleTime: 5 * 60_000,
+    placeholderData: (prev) => prev,
+  });
+}
 
 export function useCompanyOverview(ticker: string) {
   return useQuery({

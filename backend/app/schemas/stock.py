@@ -1,6 +1,13 @@
 from pydantic import BaseModel
 
 
+class SymbolSearchResult(BaseModel):
+    symbol: str
+    name: str
+    exchange: str = ""
+    type: str = ""
+
+
 class CompanyOverview(BaseModel):
     ticker: str
     name: str | None = None

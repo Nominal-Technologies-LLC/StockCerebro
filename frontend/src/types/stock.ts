@@ -1,3 +1,10 @@
+export interface SymbolSearchResult {
+  symbol: string;
+  name: string;
+  exchange: string;
+  type: string;
+}
+
 export interface CompanyOverview {
   ticker: string;
   name: string | null;
