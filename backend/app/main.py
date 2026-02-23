@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.endpoints import admin, auth, stock, fundamental, technical, scorecard, news, earnings, macro_risk, subscription
+from app.api.endpoints import admin, auth, stock, fundamental, technical, scorecard, news, earnings, macro_risk, subscription, recently_viewed
 
 logging.basicConfig(level=logging.INFO)
 
@@ -27,6 +27,7 @@ app.include_router(news.router)
 app.include_router(earnings.router)
 app.include_router(macro_risk.router)
 app.include_router(subscription.router)
+app.include_router(recently_viewed.router)
 
 
 @app.get("/api/health")
