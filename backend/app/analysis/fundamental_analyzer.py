@@ -566,8 +566,8 @@ class FundamentalAnalyzer:
             return self._growth_rate_score(pct)
         ratio = pct / benchmark
         breakpoints = [
-            (0.0, 5), (0.3, 15), (0.5, 30), (0.7, 45), (0.9, 55),
-            (1.0, 65), (1.2, 80), (1.5, 90), (2.0, 95),
+            (0.0, 5), (0.3, 15), (0.5, 28), (0.7, 38), (0.9, 48),
+            (1.0, 55), (1.3, 68), (1.5, 78), (2.0, 90), (3.0, 95),
         ]
         if ratio <= breakpoints[0][0]:
             return float(breakpoints[0][1])
