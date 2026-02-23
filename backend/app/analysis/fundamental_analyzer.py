@@ -70,6 +70,19 @@ class FundamentalAnalyzer:
         financials = await self._get_financials(ticker)
         data_gaps = []
 
+        # Calculate EV/EBITDA and ROIC from financial statements if not available
+        if not info.get("evEbitda"):
+            calculated = self._calculate_ev_ebitda(info, financials)
+            if calculated is not None:
+                info["evEbitda"] = calculated
+                logger.info(f"Calculated EV/EBITDA for {ticker} from financial statements: {calculated:.2f}")
+
+        if not info.get("roic") and not self._is_financial_sector(info.get("sector")):
+            calculated = self._calculate_roic(financials)
+            if calculated is not None:
+                info["roic"] = calculated
+                logger.info(f"Calculated ROIC for {ticker} from financial statements: {calculated:.2f}%")
+
         benchmarks = await self._get_peer_benchmarks(ticker, info)
 
         # Compute sub-scores (3 pillars)
@@ -1206,6 +1219,162 @@ class FundamentalAnalyzer:
 
         return MetricScore(value=round(pr, 1), score=round(score, 1),
                            grade=score_to_grade(score), description=desc)
+
+    # ── Financial Statement Calculations ────────────────────────────
+
+    @staticmethod
+    def _ttm_from_quarterly(quarterly: dict, key: str) -> float | None:
+        """Sum the last 4 quarters of a flow metric to get trailing 12 months."""
+        if not quarterly:
+            return None
+        periods = sorted(quarterly.keys(), reverse=True)
+        values = []
+        for p in periods[:4]:
+            val = quarterly[p].get(key)
+            if val is not None:
+                values.append(val)
+        if len(values) < 4:
+            return None
+        return sum(values)
+
+    @staticmethod
+    def _latest_snapshot(quarterly: dict, key: str) -> float | None:
+        """Get the most recent balance sheet snapshot value."""
+        if not quarterly:
+            return None
+        periods = sorted(quarterly.keys(), reverse=True)
+        for p in periods:
+            val = quarterly[p].get(key)
+            if val is not None:
+                return val
+        return None
+
+    @staticmethod
+    def _most_recent_annual(financials: dict, section: str) -> dict | None:
+        """Get the most recent annual period's data from yfinance financials."""
+        data = financials.get(section, {})
+        if not data:
+            return None
+        periods = sorted(data.keys(), reverse=True)
+        return data[periods[0]] if periods else None
+
+    def _calculate_ev_ebitda(self, info: dict, financials: dict) -> float | None:
+        """
+        Calculate EV/EBITDA from available data sources:
+        1. Quarterly XBRL data (Finnhub/EDGAR) — TTM from last 4 quarters
+        2. yfinance annual financial statements (fallback)
+        """
+        market_cap = info.get("marketCap")
+        if not market_cap or market_cap <= 0:
+            return None
+
+        quarterly = financials.get("quarterly_income", {})
+
+        # Try quarterly XBRL data first (primary — works from Docker)
+        if quarterly and len(quarterly) >= 4:
+            ttm_op_income = self._ttm_from_quarterly(quarterly, "Operating Income")
+            ttm_da = self._ttm_from_quarterly(quarterly, "Depreciation And Amortization")
+
+            if ttm_op_income is not None:
+                ebitda = ttm_op_income + abs(ttm_da) if ttm_da is not None else ttm_op_income
+
+                if ebitda > 0:
+                    # Balance sheet from quarterly snapshots
+                    total_debt = self._latest_snapshot(quarterly, "Total Debt") or 0
+                    cash = self._latest_snapshot(quarterly, "Cash And Cash Equivalents") or 0
+                    ev = market_cap + total_debt - cash
+
+                    if ev > 0:
+                        logger.debug(f"EV/EBITDA from quarterly XBRL: EV={ev/1e9:.1f}B, EBITDA={ebitda/1e9:.1f}B")
+                        return round(ev / ebitda, 2)
+
+        # Fallback: yfinance annual statements
+        income = self._most_recent_annual(financials, "income_statement")
+        balance = self._most_recent_annual(financials, "balance_sheet")
+        if income and balance:
+            ebitda = income.get("EBITDA")
+            if ebitda is None:
+                operating_income = income.get("Operating Income") or income.get("OperatingIncome")
+                if operating_income is not None:
+                    cf = self._most_recent_annual(financials, "cash_flow")
+                    da = None
+                    if cf:
+                        da = cf.get("Depreciation And Amortization") or cf.get("DepreciationAndAmortization")
+                    if da is None:
+                        da = income.get("Depreciation And Amortization") or income.get("DepreciationAndAmortization")
+                    ebitda = operating_income + abs(da) if da is not None else operating_income
+
+            if ebitda and ebitda > 0:
+                total_debt = (balance.get("Total Debt") or balance.get("TotalDebt")
+                              or balance.get("Long Term Debt") or balance.get("LongTermDebt") or 0)
+                cash = (balance.get("Cash And Cash Equivalents") or balance.get("CashAndCashEquivalents")
+                        or balance.get("Cash Cash Equivalents And Short Term Investments") or 0)
+                ev = market_cap + total_debt - cash
+                if ev > 0:
+                    return round(ev / ebitda, 2)
+
+        return None
+
+    def _calculate_roic(self, financials: dict) -> float | None:
+        """
+        Calculate ROIC from available data sources:
+        1. Quarterly XBRL data (Finnhub/EDGAR) — TTM income, latest balance sheet
+        2. yfinance annual financial statements (fallback)
+        """
+        quarterly = financials.get("quarterly_income", {})
+
+        # Try quarterly XBRL data first (primary — works from Docker)
+        if quarterly and len(quarterly) >= 4:
+            ttm_op_income = self._ttm_from_quarterly(quarterly, "Operating Income")
+            if ttm_op_income is not None:
+                ttm_tax = self._ttm_from_quarterly(quarterly, "Tax Provision")
+                ttm_pretax = self._ttm_from_quarterly(quarterly, "Pretax Income")
+
+                if ttm_tax is not None and ttm_pretax and ttm_pretax > 0:
+                    tax_rate = max(0, min(ttm_tax / ttm_pretax, 0.5))
+                else:
+                    tax_rate = 0.21
+
+                nopat = ttm_op_income * (1 - tax_rate)
+
+                equity = self._latest_snapshot(quarterly, "Stockholders Equity") or 0
+                total_debt = self._latest_snapshot(quarterly, "Total Debt") or 0
+                cash = self._latest_snapshot(quarterly, "Cash And Cash Equivalents") or 0
+                invested_capital = equity + total_debt - cash
+
+                if invested_capital > 0:
+                    roic = (nopat / invested_capital) * 100
+                    logger.debug(f"ROIC from quarterly XBRL: NOPAT={nopat/1e9:.2f}B, IC={invested_capital/1e9:.2f}B, ROIC={roic:.1f}%")
+                    return round(roic, 2)
+
+        # Fallback: yfinance annual statements
+        income = self._most_recent_annual(financials, "income_statement")
+        balance = self._most_recent_annual(financials, "balance_sheet")
+        if income and balance:
+            operating_income = income.get("Operating Income") or income.get("OperatingIncome")
+            if operating_income is not None:
+                tax_provision = income.get("Tax Provision") or income.get("TaxProvision") or income.get("Income Tax Expense")
+                pretax_income = income.get("Pretax Income") or income.get("PretaxIncome")
+
+                if tax_provision is not None and pretax_income and pretax_income > 0:
+                    tax_rate = max(0, min(tax_provision / pretax_income, 0.5))
+                else:
+                    tax_rate = 0.21
+
+                nopat = operating_income * (1 - tax_rate)
+
+                equity = (balance.get("Stockholders Equity") or balance.get("StockholdersEquity")
+                          or balance.get("Total Equity Gross Minority Interest") or 0)
+                total_debt = (balance.get("Total Debt") or balance.get("TotalDebt")
+                              or balance.get("Long Term Debt") or balance.get("LongTermDebt") or 0)
+                cash = (balance.get("Cash And Cash Equivalents") or balance.get("CashAndCashEquivalents")
+                        or balance.get("Cash Cash Equivalents And Short Term Investments") or 0)
+                invested_capital = equity + total_debt - cash
+
+                if invested_capital > 0:
+                    return round((nopat / invested_capital) * 100, 2)
+
+        return None
 
     # ── Helpers ───────────────────────────────────────────────────────
 
