@@ -45,8 +45,46 @@ CAPEX_CONCEPTS = [
     "us-gaap_PaymentsToAcquireProductiveAssets",
     "us-gaap_CapitalExpendituresIncurredButNotYetPaid",
 ]
+DA_CONCEPTS = [
+    "us-gaap_DepreciationDepletionAndAmortization",
+    "us-gaap_DepreciationAmortizationAndAccretionNet",
+    "us-gaap_DepreciationAndAmortization",
+]
+TAX_CONCEPTS = [
+    "us-gaap_IncomeTaxExpenseBenefit",
+]
+PRETAX_INCOME_CONCEPTS = [
+    "us-gaap_IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+    "us-gaap_IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+    "us-gaap_IncomeLossFromContinuingOperationsBeforeIncomeTaxes",
+]
 
-_METRIC_KEYS = ["Total Revenue", "Net Income", "Operating Income", "Operating Cash Flow", "Capital Expenditure"]
+# Balance sheet (point-in-time snapshots, NOT cumulative flows)
+TOTAL_DEBT_CONCEPTS = [
+    "us-gaap_LongTermDebt",
+    "us-gaap_LongTermDebtNoncurrent",
+    "us-gaap_LongTermDebtAndCapitalLeaseObligations",
+]
+CASH_CONCEPTS = [
+    "us-gaap_CashAndCashEquivalentsAtCarryingValue",
+    "us-gaap_CashCashEquivalentsAndShortTermInvestments",
+    "us-gaap_Cash",
+]
+EQUITY_CONCEPTS = [
+    "us-gaap_StockholdersEquity",
+    "us-gaap_StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+]
+
+# Flow items get de-accumulated for cumulative YTD periods
+_FLOW_KEYS = [
+    "Total Revenue", "Net Income", "Operating Income", "Operating Cash Flow",
+    "Capital Expenditure", "Depreciation And Amortization", "Tax Provision", "Pretax Income",
+]
+# Snapshot items are point-in-time and should NOT be de-accumulated
+_SNAPSHOT_KEYS = ["Total Debt", "Cash And Cash Equivalents", "Stockholders Equity"]
+
+# Legacy alias for backward compatibility
+_METRIC_KEYS = _FLOW_KEYS
 
 
 def _first_match(report_data: dict, concepts: list[str]) -> float | None:
@@ -113,6 +151,12 @@ def parse_finnhub_quarterly(reports: list[dict]) -> dict:
         period_data = {}
         ocf = _first_match(flat, OCF_CONCEPTS)
         capex = _first_match(flat, CAPEX_CONCEPTS)
+        da = _first_match(flat, DA_CONCEPTS)
+        tax = _first_match(flat, TAX_CONCEPTS)
+        pretax = _first_match(flat, PRETAX_INCOME_CONCEPTS)
+        total_debt = _first_match(flat, TOTAL_DEBT_CONCEPTS)
+        cash = _first_match(flat, CASH_CONCEPTS)
+        equity = _first_match(flat, EQUITY_CONCEPTS)
 
         if revenue is not None:
             period_data["Total Revenue"] = revenue
@@ -124,6 +168,19 @@ def parse_finnhub_quarterly(reports: list[dict]) -> dict:
             period_data["Operating Cash Flow"] = ocf
         if capex is not None:
             period_data["Capital Expenditure"] = capex
+        if da is not None:
+            period_data["Depreciation And Amortization"] = da
+        if tax is not None:
+            period_data["Tax Provision"] = tax
+        if pretax is not None:
+            period_data["Pretax Income"] = pretax
+        # Balance sheet snapshots
+        if total_debt is not None:
+            period_data["Total Debt"] = total_debt
+        if cash is not None:
+            period_data["Cash And Cash Equivalents"] = cash
+        if equity is not None:
+            period_data["Stockholders Equity"] = equity
 
         days = (end_dt - start_dt).days if start_dt else 0
 
@@ -179,11 +236,16 @@ def parse_finnhub_quarterly(reports: list[dict]) -> dict:
                 if standalone_q1:
                     # De-accumulate: this cumulative entry minus standalone Q1
                     deaccum = {}
-                    for key in _METRIC_KEYS:
+                    for key in _FLOW_KEYS:
                         cum_val = entry["data"].get(key)
                         q1_val = standalone_q1["data"].get(key)
                         if cum_val is not None and q1_val is not None:
                             deaccum[key] = cum_val - q1_val
+                    # Carry forward balance sheet snapshots as-is
+                    for key in _SNAPSHOT_KEYS:
+                        val = entry["data"].get(key)
+                        if val is not None:
+                            deaccum[key] = val
                     if deaccum:
                         result[entry["end_key"]] = deaccum
                 else:
@@ -194,11 +256,16 @@ def parse_finnhub_quarterly(reports: list[dict]) -> dict:
                 # Subtract prior cumulative to get standalone quarter
                 prior = entries[i - 1]
                 deaccum = {}
-                for key in _METRIC_KEYS:
+                for key in _FLOW_KEYS:
                     cum_val = entry["data"].get(key)
                     prior_val = prior["data"].get(key)
                     if cum_val is not None and prior_val is not None:
                         deaccum[key] = cum_val - prior_val
+                # Carry forward balance sheet snapshots as-is
+                for key in _SNAPSHOT_KEYS:
+                    val = entry["data"].get(key)
+                    if val is not None:
+                        deaccum[key] = val
                 if deaccum:
                     result[entry["end_key"]] = deaccum
 
@@ -288,6 +355,12 @@ def parse_edgar_quarterly(facts: dict) -> dict:
     _extract_concept(us_gaap, OPERATING_INCOME_CONCEPTS, "Operating Income")
     _extract_concept(us_gaap, OCF_CONCEPTS, "Operating Cash Flow")
     _extract_concept(us_gaap, CAPEX_CONCEPTS, "Capital Expenditure")
+    _extract_concept(us_gaap, DA_CONCEPTS, "Depreciation And Amortization")
+    _extract_concept(us_gaap, TAX_CONCEPTS, "Tax Provision")
+    _extract_concept(us_gaap, PRETAX_INCOME_CONCEPTS, "Pretax Income")
+    _extract_concept(us_gaap, TOTAL_DEBT_CONCEPTS, "Total Debt")
+    _extract_concept(us_gaap, CASH_CONCEPTS, "Cash And Cash Equivalents")
+    _extract_concept(us_gaap, EQUITY_CONCEPTS, "Stockholders Equity")
 
     # Only keep periods that have at least revenue or net income
     result = {
