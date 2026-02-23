@@ -106,3 +106,42 @@ async def fetch_quote_via_chart(ticker: str) -> dict | None:
     if not result:
         return None
     return result["meta"]
+
+
+async def search_symbols(query: str, max_results: int = 8) -> list[dict]:
+    """
+    Search for tickers by symbol or company name using Yahoo Finance search API.
+    Returns list of dicts with 'symbol', 'name', 'exchange', and 'type' keys.
+    """
+    url = f"{BASE_URL}/v1/finance/search"
+    params = {
+        "q": query,
+        "quotesCount": max_results,
+        "newsCount": 0,
+        "listsCount": 0,
+        "enableFuzzyQuery": "true",
+    }
+    try:
+        async with httpx.AsyncClient(headers=HEADERS, follow_redirects=True, timeout=10) as client:
+            resp = await client.get(url, params=params)
+            if resp.status_code != 200:
+                logger.warning(f"Yahoo search API returned {resp.status_code} for query '{query}'")
+                return []
+            data = resp.json()
+            quotes = data.get("quotes", [])
+            results = []
+            for q in quotes:
+                symbol = q.get("symbol", "")
+                # Skip non-US tickers (contain dots like "AAPL.L") unless they're common ETFs
+                if "." in symbol:
+                    continue
+                results.append({
+                    "symbol": symbol,
+                    "name": q.get("longname") or q.get("shortname") or "",
+                    "exchange": q.get("exchDisp", ""),
+                    "type": q.get("quoteType", ""),
+                })
+            return results[:max_results]
+    except Exception as e:
+        logger.error(f"Yahoo search error for query '{query}': {e}")
+        return []

@@ -1,3 +1,10 @@
+export interface SymbolSearchResult {
+  symbol: string;
+  name: string;
+  exchange: string;
+  type: string;
+}
+
 export interface CompanyOverview {
   ticker: string;
   name: string | null;
@@ -229,6 +236,15 @@ export interface MacroRiskResponse {
   analyzed_at: string;
   model_used: string;
   error: string | null;
+}
+
+export interface RecentlyViewedItem {
+  ticker: string;
+  company_name: string | null;
+  grade: string | null;
+  signal: string | null;
+  score: number | null;
+  viewed_at: string;
 }
 
 export interface Scorecard {
