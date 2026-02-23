@@ -50,14 +50,14 @@ async def endpoint(ticker, db=Depends(get_db), current_user=Depends(get_current_
 5. OpenAI (`openai_service.py`) — macro risk analysis (GPT-5.1). Sends company profile, 6 key metrics, and up to 10 news headline+summary pairs; returns structured JSON with tailwinds, headwinds, and a summary.
 
 **Analysis engines** (`backend/app/analysis/`):
-- `fundamental_analyzer.py` — health scoring (FCF, OCF, IC, D/E, CR; banks use ROE/ROA instead), valuation (peer-relative), growth (QoQ revenue + earnings).
+- `fundamental_analyzer.py` — health scoring (FCF, OCF, IC, D/E, CR; banks use ROE/ROA instead), valuation (peer-relative with EV/EBITDA and ROIC calculated from XBRL quarterly data when Finnhub pre-calculated values are missing), growth (QoQ revenue + earnings).
 - `technical_analyzer.py` — RSI, MACD, moving averages, support/resistance.
 - `scorecard_engine.py` — combines fundamental + technical with override rules (e.g., weak fundamentals + strong technicals caps at HOLD).
 - `grading.py` — score → letter grade. Centered at 50=C (A=80+, B=65+, C=50+, D=30+, F<30).
 
 **Caching** (`backend/app/services/cache_manager.py`): Database-backed with TTLs. Prices: 15min during market hours / 24h when closed. Fundamentals/company: 24h. News: 1h. Analysis: 30min. Macro risk: 6h for successful responses (`"macro_risk"` key), 5min for error responses (`"macro_risk_error"` key) so transient failures don't lock out retries.
 
-**Quarterly data pitfall**: Finnhub returns cumulative YTD figures for Q2/Q3. `xbrl_mapper.py` detects this (period >120 days) and de-accumulates to standalone quarters.
+**Quarterly data pipeline** (`xbrl_mapper.py`): Extracts financial data from Finnhub/EDGAR XBRL reports. Flow items (revenue, net income, operating income, OCF, capex, D&A, tax provision, pretax income) are de-accumulated for cumulative YTD periods. Balance sheet snapshots (total debt, cash, stockholders equity) are carried forward as-is. This data powers TTM calculations for EV/EBITDA and ROIC when Finnhub's pre-calculated metrics are missing, which is common.
 
 ### Frontend
 
