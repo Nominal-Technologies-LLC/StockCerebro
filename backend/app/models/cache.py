@@ -22,7 +22,7 @@ class CompanyCache(Base):
 class PriceCache(Base):
     __tablename__ = "price_cache"
     __table_args__ = (
-        Index("ix_price_cache_lookup", "ticker", "interval", "period"),
+        Index("ix_price_cache_lookup", "ticker", "interval", "period", unique=True),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -36,7 +36,7 @@ class PriceCache(Base):
 class FundamentalCache(Base):
     __tablename__ = "fundamental_cache"
     __table_args__ = (
-        Index("ix_fundamental_cache_lookup", "ticker", "data_type", "source"),
+        Index("ix_fundamental_cache_lookup", "ticker", "data_type", "source", unique=True),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -50,7 +50,7 @@ class FundamentalCache(Base):
 class AnalysisCache(Base):
     __tablename__ = "analysis_cache"
     __table_args__ = (
-        Index("ix_analysis_cache_lookup", "ticker", "analysis_type"),
+        Index("ix_analysis_cache_lookup", "ticker", "analysis_type", unique=True),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -63,7 +63,7 @@ class AnalysisCache(Base):
 class NewsCache(Base):
     __tablename__ = "news_cache"
     __table_args__ = (
-        Index("ix_news_cache_lookup", "ticker", "source"),
+        Index("ix_news_cache_lookup", "ticker", "source", unique=True),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
