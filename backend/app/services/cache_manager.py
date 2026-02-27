@@ -117,9 +117,9 @@ class CacheManager:
                 PriceCache.ticker == ticker,
                 PriceCache.interval == interval,
                 PriceCache.period == period,
-            )
+            ).order_by(PriceCache.fetched_at.desc())
         )
-        cached = result.scalar_one_or_none()
+        cached = result.scalars().first()
         if cached and not _is_stale(cached.fetched_at, ttl):
             return cached.ohlcv_data
         return None
@@ -130,12 +130,15 @@ class CacheManager:
                 PriceCache.ticker == ticker,
                 PriceCache.interval == interval,
                 PriceCache.period == period,
-            )
+            ).order_by(PriceCache.fetched_at.desc())
         )
-        existing = result.scalar_one_or_none()
-        if existing:
+        rows = result.scalars().all()
+        if rows:
+            existing = rows[0]
             existing.ohlcv_data = data
             existing.fetched_at = datetime.now(timezone.utc)
+            for dup in rows[1:]:
+                await self.db.delete(dup)
         else:
             entry = PriceCache(
                 ticker=ticker,
@@ -155,9 +158,9 @@ class CacheManager:
                 FundamentalCache.ticker == ticker,
                 FundamentalCache.data_type == data_type,
                 FundamentalCache.source == source,
-            )
+            ).order_by(FundamentalCache.fetched_at.desc())
         )
-        cached = result.scalar_one_or_none()
+        cached = result.scalars().first()
         if cached and not _is_stale(cached.fetched_at, ttl):
             return cached.data
         return None
@@ -168,12 +171,16 @@ class CacheManager:
                 FundamentalCache.ticker == ticker,
                 FundamentalCache.data_type == data_type,
                 FundamentalCache.source == source,
-            )
+            ).order_by(FundamentalCache.fetched_at.desc())
         )
-        existing = result.scalar_one_or_none()
-        if existing:
+        rows = result.scalars().all()
+        if rows:
+            # Keep the most recent, delete any duplicates
+            existing = rows[0]
             existing.data = data
             existing.fetched_at = datetime.now(timezone.utc)
+            for dup in rows[1:]:
+                await self.db.delete(dup)
         else:
             entry = FundamentalCache(
                 ticker=ticker,
@@ -192,9 +199,9 @@ class CacheManager:
             select(AnalysisCache).where(
                 AnalysisCache.ticker == ticker,
                 AnalysisCache.analysis_type == analysis_type,
-            )
+            ).order_by(AnalysisCache.fetched_at.desc())
         )
-        cached = result.scalar_one_or_none()
+        cached = result.scalars().first()
         if cached and not _is_stale(cached.fetched_at, ttl):
             return cached.data
         return None
@@ -204,12 +211,15 @@ class CacheManager:
             select(AnalysisCache).where(
                 AnalysisCache.ticker == ticker,
                 AnalysisCache.analysis_type == analysis_type,
-            )
+            ).order_by(AnalysisCache.fetched_at.desc())
         )
-        existing = result.scalar_one_or_none()
-        if existing:
+        rows = result.scalars().all()
+        if rows:
+            existing = rows[0]
             existing.data = data
             existing.fetched_at = datetime.now(timezone.utc)
+            for dup in rows[1:]:
+                await self.db.delete(dup)
         else:
             entry = AnalysisCache(
                 ticker=ticker,
@@ -227,9 +237,9 @@ class CacheManager:
             select(NewsCache).where(
                 NewsCache.ticker == ticker,
                 NewsCache.source == source,
-            )
+            ).order_by(NewsCache.fetched_at.desc())
         )
-        cached = result.scalar_one_or_none()
+        cached = result.scalars().first()
         if cached and not _is_stale(cached.fetched_at, ttl):
             return cached.articles.get("articles", []) if cached.articles else []
         return None
@@ -239,12 +249,15 @@ class CacheManager:
             select(NewsCache).where(
                 NewsCache.ticker == ticker,
                 NewsCache.source == source,
-            )
+            ).order_by(NewsCache.fetched_at.desc())
         )
-        existing = result.scalar_one_or_none()
-        if existing:
+        rows = result.scalars().all()
+        if rows:
+            existing = rows[0]
             existing.articles = {"articles": articles}
             existing.fetched_at = datetime.now(timezone.utc)
+            for dup in rows[1:]:
+                await self.db.delete(dup)
         else:
             entry = NewsCache(
                 ticker=ticker,
